@@ -42,21 +42,17 @@ class RowNormalizationService
             'notes' => []
         ];
 
-        // Extract URLs from all URL columns
-        foreach ($headerMapping['url_columns'] as $urlCol) {
-            $colIndex = $urlCol['index'];
-            $urlValue = $rowData[$colIndex] ?? null;
-            
-            if (!empty($urlValue)) {
-                $normalized['urls'][] = [
-                    'column_name' => $urlCol['name'],
-                    'original_url' => trim($urlValue),
-                    'final_url' => null,
-                    'status' => null,
-                    'status_code' => null,
-                    'error' => null
-                ];
-            }
+        // ONLY process Submission page column (column index 3) - hardcoded
+        $submissionPageIdx = 3;
+        if (!empty($rowData[$submissionPageIdx])) {
+            $normalized['urls'][] = [
+                'column_name' => 'Submission page',
+                'original_url' => trim($rowData[$submissionPageIdx]),
+                'final_url' => null,
+                'status' => null,
+                'status_code' => null,
+                'error' => null
+            ];
         }
 
         // Extract post content

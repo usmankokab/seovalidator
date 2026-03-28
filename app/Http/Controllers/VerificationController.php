@@ -134,9 +134,9 @@ class VerificationController extends Controller
                     continue;
                 }
                 
-                // Filter to ONLY URL columns requested if specified
-                $urlColumnFilter = $request->input('url_column', '');
-                if (!empty($urlColumnFilter)) {
+                // Default to ONLY Submission page column if no filter specified
+                $urlColumnFilter = $request->input('url_column', 'submission page');
+                if (!empty($urlColumnFilter) && $urlColumnFilter !== 'submission page') {
                     // Only keep the requested URL column
                     $keptColumns = [];
                     foreach ($headerMapping['url_columns'] as $col) {

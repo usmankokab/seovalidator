@@ -126,8 +126,8 @@ class VerificationController extends Controller
                 // Map headers
                 $headerMapping = $this->headerService->map($sheetData['headers']);
 
-                // Filter to ONLY specific worksheet if requested
-                $worksheetFilter = $request->input('worksheet', '');
+                // Default to only High Quality Submission worksheet
+                $worksheetFilter = $request->input('worksheet', 'High Quality Submission');
                 if (!empty($worksheetFilter) && $worksheetInfo['name'] !== $worksheetFilter) {
                     // Skip other worksheets when filter is set
                     Log::info("Skipping '" . $worksheetInfo['name'] . "' - not matching filter '$worksheetFilter'");

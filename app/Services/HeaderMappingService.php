@@ -10,16 +10,9 @@ use Illuminate\Support\Facades\Log;
  */
 class HeaderMappingService
 {
-    // Fixed column headings (exact match first)
+    // Fixed column headings - ONLY Submission page for now
     private array $urlFixed = [
-        'our url', 'Our Url', 'OUR URL',
-        'submission page', 'Submission Page', 'SUBMISSION PAGE',
-        'submission url', 'Submission URL',
-        'url', 'URL', 'link', 'Link',
-        'website', 'Website',
-        'post url', 'Post URL',
-        'home page', 'Home Page', 'HOME PAGE',
-        'submission page', 'Submission Page'
+        'submission page'
     ];
     
     // Fixed status column for approval

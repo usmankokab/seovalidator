@@ -126,6 +126,12 @@ class VerificationController extends Controller
                 // Map headers
                 $headerMapping = $this->headerService->map($sheetData['headers']);
 
+                // Skip if no URL columns found (i.e., no Submission page column)
+                if (empty($headerMapping['url_columns'])) {
+                    Log::info("Skipping '" . $worksheetInfo['name'] . "' - no Submission page column");
+                    continue;
+                }
+
                 // Default to only High Quality Submission worksheet
                 $worksheetFilter = $request->input('worksheet', 'High Quality Submission');
                 if (!empty($worksheetFilter) && $worksheetInfo['name'] !== $worksheetFilter) {

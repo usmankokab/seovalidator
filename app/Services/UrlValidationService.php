@@ -65,8 +65,9 @@ class UrlValidationService
      * @param string $url The URL to validate
      * @param string|null $ourUrl Optional - Our Url to search for in the page
      * @param string|null $keyword Optional - Keyword to search in page content
+     * @param bool $skipHtmlAnalysis If true, skips HTML content analysis (faster for batch)
      */
-    public function validate(string $url, ?string $ourUrl = null, ?string $keyword = null): array
+    public function validate(string $url, ?string $ourUrl = null, ?string $keyword = null, bool $skipHtmlAnalysis = false): array
     {
         // Check cache first
         $normalizedUrl = $this->normalizeUrl($url);
@@ -88,7 +89,8 @@ class UrlValidationService
         
         // If URL is working, fetch and analyze HTML
         // We ALWAYS analyze HTML to detect JavaScript SPAs (Cannot Verify)
-        if ($result['status'] === self::STATUS_WORKING) {
+        // Skip analysis if explicitly requested (for faster batch processing)
+        if ($result['status'] === self::STATUS_WORKING && !$skipHtmlAnalysis) {
             $htmlAnalysis = $this->analyzePageContent($url, $ourUrl, $keyword);
             $result = array_merge($result, $htmlAnalysis);
             
@@ -461,6 +463,133 @@ class UrlValidationService
         }
         
         return false;
+    }
+
+    /**
+     * Batch validate multiple URLs with parallel execution and HTML analysis
+     * This is the main method used for verification - runs URLs in parallel with full analysis
+     * @param array $items Array of [url => string, ourUrl => string, keyword => string]
+     * @param int $concurrency Max concurrent requests (default 30)
+     * @return array Results indexed by key
+     */
+    public function batchValidateWithAnalysis(array $items, int $concurrency = 30): array
+    {
+        if (empty($items)) {
+            return [];
+        }
+
+        Log::info("Starting parallel validation with concurrency=$concurrency for " . count($items) . " URLs");
+        $startTime = microtime(true);
+
+        // Create a new client for parallel requests
+        $parallelClient = new Client([
+            'timeout' => 10,
+            'headers' => [
+                'User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+                'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            ]
+        ]);
+
+        $results = [];
+        $responses = [];
+        $errors = [];
+
+        // Use Pool with concurrency for parallel execution
+        $requests = function () use ($items) {
+            foreach ($items as $i => $item) {
+                $url = $item['url'] ?? '';
+                if (!empty($url) && $this->isValidUrl($url)) {
+                    yield $i => new Request('GET', $url);
+                }
+            }
+        };
+
+        $pool = new Pool($parallelClient, $requests(), [
+            'concurrency' => $concurrency,
+            'fulfilled' => function ($response, $index) use (&$responses) {
+                $responses[$index] = $response->getStatusCode();
+            },
+            'rejected' => function ($reason, $index) use (&$errors) {
+                $errors[$index] = $reason->getMessage();
+            }
+        ]);
+
+        $pool->promise()->wait();
+
+        // Now process each URL with full HTML analysis
+        $itemKeys = array_keys(array_filter($items, fn($item) => !empty($item['url'] ?? '')));
+        
+        foreach ($items as $i => $item) {
+            $url = $item['url'] ?? '';
+            $ourUrl = $item['ourUrl'] ?? null;
+            $keyword = $item['keyword'] ?? null;
+
+            if (empty($url)) {
+                $results[$i] = $this->createResult($url, self::STATUS_INVALID, 0, 'Empty URL');
+                continue;
+            }
+
+            // Check if request failed in pool
+            if (isset($errors[$i])) {
+                $results[$i] = $this->createResult($url, self::STATUS_BROKEN, 0, $errors[$i]);
+                continue;
+            }
+
+            $statusCode = $responses[$i] ?? 0;
+
+            // Determine status from status code
+            if ($statusCode === 0) {
+                $results[$i] = $this->createResult($url, self::STATUS_BROKEN, 0, 'Request failed');
+            } elseif ($statusCode >= 300 && $statusCode < 400) {
+                $results[$i] = $this->createResult($url, self::STATUS_REDIRECTED, $statusCode, null);
+            } elseif ($statusCode === 403) {
+                $results[$i] = $this->createResult($url, self::STATUS_CANNOT_VERIFY, $statusCode, 'Access blocked - likely bot protection or requires authentication (HTTP 403)');
+                $results[$i]['cannot_verify'] = true;
+            } elseif ($statusCode >= 200 && $statusCode < 300) {
+                // For success, do full HTML analysis
+                $htmlAnalysis = $this->analyzePageContent($url, $ourUrl, $keyword);
+                
+                $result = $this->createResult($url, self::STATUS_WORKING, $statusCode, null);
+                $result = array_merge($result, $htmlAnalysis);
+                
+                // Check for JavaScript SPA
+                if (isset($htmlAnalysis['cannot_verify']) && $htmlAnalysis['cannot_verify']) {
+                    $result['status'] = self::STATUS_CANNOT_VERIFY;
+                    $result['cannot_verify'] = true;
+                    $result['status_code'] = 0;
+                    $result['error'] = $htmlAnalysis['reason'] ?? 'Cannot verify - page requires JavaScript rendering';
+                }
+                // Check for blank page
+                elseif (isset($htmlAnalysis['is_blank_page']) && $htmlAnalysis['is_blank_page']) {
+                    $result['is_blank'] = true;
+                    $result['error'] = 'Blank page - HTTP 200 but no content found';
+                }
+                // Check for ourUrl/keyword not found
+                elseif (!empty($ourUrl) && isset($htmlAnalysis['our_url_found']) && !$htmlAnalysis['our_url_found']) {
+                    $result['status'] = self::STATUS_BROKEN;
+                    $result['status_code'] = 0;
+                    $result['error'] = 'Our URL not found in page hyperlinks';
+                }
+                elseif (!empty($keyword) && isset($htmlAnalysis['keyword_found']) && !$htmlAnalysis['keyword_found']) {
+                    $result['status'] = self::STATUS_BROKEN;
+                    $result['status_code'] = 0;
+                    $result['error'] = 'Keyword not found in page content';
+                }
+                
+                $results[$i] = $result;
+            } else {
+                $results[$i] = $this->createResult($url, self::STATUS_BROKEN, $statusCode, "HTTP {$statusCode}");
+            }
+
+            // Cache result
+            $normalized = $this->normalizeUrl($url);
+            $this->urlCache[$normalized] = $results[$i];
+        }
+
+        $elapsed = round(microtime(true) - $startTime, 2);
+        Log::info("Parallel validation completed in {$elapsed}s for " . count($items) . " URLs");
+
+        return $results;
     }
 
     /**

@@ -234,26 +234,22 @@ class VerificationController extends Controller
                     }
                 }
 
-                // Run batch validation with HTML analysis for JavaScript SPA detection
-                // We need to use individual validate() calls to get cannot_verify status
+                // Run batch validation with parallel execution and HTML analysis for JavaScript SPA detection
+                // Use batchValidateWithAnalysis for much faster processing with concurrency=30
                 if (!empty($validationItems)) {
+                    // Use parallel batch validation with 30 concurrent requests
+                    $batchResults = $this->urlValidator->batchValidateWithAnalysis($validationItems, 30);
+                    
+                    // Map results back to rows
                     foreach ($validationItems as $i => $item) {
-                        // Clear cache to get fresh results
-                        $this->urlValidator->clearCache();
-                        
-                        // Use validate() which includes HTML analysis for JavaScript SPA detection
-                        $res = $this->urlValidator->validate(
-                            $item['url'],
-                            $item['ourUrl'],
-                            $item['keyword']
-                        );
-                        
                         $rIdx = $rowIndexes[$i];
                         $uIdx = $urlIndexes[$i];
-                        $filteredRows[$rIdx]['urls'][$uIdx]['status'] = $res['status'];
-                        $filteredRows[$rIdx]['urls'][$uIdx]['status_code'] = $res['status_code'];
-                        $filteredRows[$rIdx]['urls'][$uIdx]['final_url'] = $res['final_url'];
-                        $filteredRows[$rIdx]['urls'][$uIdx]['error'] = $res['error'];
+                        $res = $batchResults[$i] ?? [];
+                        
+                        $filteredRows[$rIdx]['urls'][$uIdx]['status'] = $res['status'] ?? 'Unknown';
+                        $filteredRows[$rIdx]['urls'][$uIdx]['status_code'] = $res['status_code'] ?? 0;
+                        $filteredRows[$rIdx]['urls'][$uIdx]['final_url'] = $res['final_url'] ?? '';
+                        $filteredRows[$rIdx]['urls'][$uIdx]['error'] = $res['error'] ?? null;
                         $filteredRows[$rIdx]['urls'][$uIdx]['cannot_verify'] = $res['cannot_verify'] ?? false;
                         $filteredRows[$rIdx]['urls'][$uIdx]['is_blank'] = $res['is_blank'] ?? false;
                     }

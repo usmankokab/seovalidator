@@ -349,9 +349,10 @@ class UrlValidationService
                 return $this->handleRequestException($e, $url);
             } catch (\Exception $e) {
                 $lastException = $e;
+                $exceptionMessage = $e->getMessage();
                 
                 // DNS errors - don't retry
-                if (str_contains($message, 'dns') || str_contains($message, 'Name or service not known') || str_contains($message, 'Could not resolve host')) {
+                if (str_contains($exceptionMessage, 'dns') || str_contains($exceptionMessage, 'Name or service not known') || str_contains($exceptionMessage, 'Could not resolve host')) {
                     return $this->createResult($url, self::STATUS_BROKEN, 0, 'DNS error: Could not resolve host');
                 }
                 

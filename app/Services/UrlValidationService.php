@@ -113,19 +113,20 @@ class UrlValidationService
             // If ourUrl is provided but not found in page hyperlinks, or keyword not found in page content
             // It could be a placeholder page or broken content - mark as Broken
             // BUT don't override Cannot Verify or Blank status
-            if ((!isset($result['cannot_verify']) || !$result['cannot_verify']) && (!isset($result['is_blank']) || !$result['is_blank'])) {
-                if (!empty($ourUrl) && isset($htmlAnalysis['our_url_found']) && !$htmlAnalysis['our_url_found']) {
-                    $result['status'] = self::STATUS_BROKEN;
-                    $result['status_code'] = 0;
-                    $result['error'] = 'Our URL not found in page hyperlinks - page may be broken or placeholder';
-                }
-                
-                if (!empty($keyword) && isset($htmlAnalysis['keyword_found']) && !$htmlAnalysis['keyword_found']) {
-                    $result['status'] = self::STATUS_BROKEN;
-                    $result['status_code'] = 0;
-                    $result['error'] = 'Keyword not found in page content - page may be broken or placeholder';
-                }
-            }
+            // (COMMENTED OUT FOR SPEED - can re-enable later)
+            // if ((!isset($result['cannot_verify']) || !$result['cannot_verify']) && (!isset($result['is_blank']) || !$result['is_blank'])) {
+            //     if (!empty($ourUrl) && isset($htmlAnalysis['our_url_found']) && !$htmlAnalysis['our_url_found']) {
+            //         $result['status'] = self::STATUS_BROKEN;
+            //         $result['status_code'] = 0;
+            //         $result['error'] = 'Our URL not found in page hyperlinks - page may be broken or placeholder';
+            //     }
+            //     
+            //     if (!empty($keyword) && isset($htmlAnalysis['keyword_found']) && !$htmlAnalysis['keyword_found']) {
+            //         $result['status'] = self::STATUS_BROKEN;
+            //         $result['status_code'] = 0;
+            //         $result['error'] = 'Keyword not found in page content - page may be broken or placeholder';
+            //     }
+            // }
         }
         
         // If status is Cannot Verify (e.g., HTTP 403), ensure cannot_verify flag is set
@@ -200,39 +201,39 @@ class UrlValidationService
                 }
             }
             
-            // Search for Our Url in hyperlinks
-            if (!empty($ourUrl)) {
-                $xpath = new \DOMXPath($dom);
-                $ourUrlLower = strtolower($ourUrl);
-                
-                // Find all anchor tags
-                $links = $dom->getElementsByTagName('a');
-                foreach ($links as $link) {
-                    $href = $link->getAttribute('href');
-                    if (!empty($href) && str_contains(strtolower($href), $ourUrlLower)) {
-                        $analysis['our_url_found'] = true;
-                        $analysis['our_url_links'][] = $href;
-                    }
-                }
-            }
+            // Search for Our Url in hyperlinks (COMMENTED OUT FOR SPEED - can re-enable later)
+            // if (!empty($ourUrl)) {
+            //     $xpath = new \DOMXPath($dom);
+            //     $ourUrlLower = strtolower($ourUrl);
+            //     
+            //     // Find all anchor tags
+            //     $links = $dom->getElementsByTagName('a');
+            //     foreach ($links as $link) {
+            //         $href = $link->getAttribute('href');
+            //         if (!empty($href) && str_contains(strtolower($href), $ourUrlLower)) {
+            //             $analysis['our_url_found'] = true;
+            //             $analysis['our_url_links'][] = $href;
+            //         }
+            //     }
+            // }
             
-            // Search for keyword in page text
-            if (!empty($keyword)) {
-                $htmlLower = strtolower($html);
-                $keywordLower = strtolower($keyword);
-                
-                if (str_contains($htmlLower, $keywordLower)) {
-                    $analysis['keyword_found'] = true;
-                    
-                    // Extract excerpt around keyword
-                    $pos = strpos($htmlLower, $keywordLower);
-                    if ($pos !== false) {
-                        $start = max(0, $pos - 50);
-                        $length = strlen($keywordLower) + 100;
-                        $analysis['excerpt'] = substr($html, $start, $length);
-                    }
-                }
-            }
+            // Search for keyword in page text (COMMENTED OUT FOR SPEED - can re-enable later)
+            // if (!empty($keyword)) {
+            //     $htmlLower = strtolower($html);
+            //     $keywordLower = strtolower($keyword);
+            //     
+            //     if (str_contains($htmlLower, $keywordLower)) {
+            //         $analysis['keyword_found'] = true;
+            //         
+            //         // Extract excerpt around keyword
+            //         $pos = strpos($htmlLower, $keywordLower);
+            //         if ($pos !== false) {
+            //             $start = max(0, $pos - 50);
+            //             $length = strlen($keywordLower) + 100;
+            //             $analysis['excerpt'] = substr($html, $start, $length);
+            //         }
+            //     }
+            // }
             
             return $analysis;
             

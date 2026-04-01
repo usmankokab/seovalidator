@@ -85,7 +85,7 @@ class UrlValidationService
         }
 
         // Attempt request with retry logic
-        $result = $this->attemptRequest($url, $normalizedUrl);
+        $result = $this->attemptRequestWithRetry($url, $normalizedUrl);
         
         // If URL is working, fetch and analyze HTML
         // We ALWAYS analyze HTML to detect JavaScript SPAs (Cannot Verify)
@@ -274,6 +274,102 @@ class UrlValidationService
 
         // Basic format check
         return filter_var($url, FILTER_VALIDATE_URL) !== false;
+    }
+
+    /**
+     * Attempt HTTP request with retry logic and exponential backoff
+     */
+    private function attemptRequestWithRetry(string $url, string $normalizedUrl): array
+    {
+        $lastException = null;
+        
+        for ($attempt = 0; $attempt <= $this->maxRetries; $attempt++) {
+            try {
+                // Use exponential backoff: 1s, 2s, 4s between retries
+                if ($attempt > 0) {
+                    $sleepTime = pow(2, $attempt - 1);
+                    usleep($sleepTime * 1000000); // Convert to microseconds
+                    Log::info("Retry attempt $attempt for $url after {$sleepTime}s");
+                }
+
+                $response = $this->client->get($url, [
+                    'timeout' => $this->timeout,
+                    'http_errors' => false
+                ]);
+
+                $statusCode = $response->getStatusCode();
+                $effectiveUri = $url;
+
+                // Check for redirect
+                if ($statusCode >= 300 && $statusCode < 400) {
+                    return $this->createResult($url, self::STATUS_REDIRECTED, $statusCode, null, $effectiveUri);
+                }
+
+                // Check for success
+                if ($statusCode >= 200 && $statusCode < 300) {
+                    return $this->createResult($url, self::STATUS_WORKING, $statusCode, null, $effectiveUri);
+                }
+
+                // Client or server error - but don't retry on 4xx errors (client errors)
+                if ($statusCode >= 400 && $statusCode < 500) {
+                    // For 403, could be bot protection - try one more time after longer delay
+                    if ($statusCode === 403 && $attempt < $this->maxRetries) {
+                        $lastException = new \Exception('HTTP 403 - will retry');
+                        continue;
+                    }
+                    // Don't retry other 4xx errors
+                    return $this->createResult($url, self::STATUS_BROKEN, $statusCode, "HTTP {$statusCode}", $effectiveUri);
+                }
+
+                // 5xx errors - worth retrying
+                if ($statusCode >= 500 && $attempt < $this->maxRetries) {
+                    $lastException = new \Exception("HTTP $statusCode - server error");
+                    continue;
+                }
+                
+                return $this->createResult($url, self::STATUS_BROKEN, $statusCode, "HTTP {$statusCode}", $effectiveUri);
+
+            } catch (RequestException $e) {
+                $lastException = $e;
+                
+                // Don't retry if it's a connection error that won't improve
+                $message = $e->getMessage();
+                if (str_contains($message, 'Connection refused') || 
+                    str_contains($message, 'dns') ||
+                    str_contains($message, 'Could not resolve host')) {
+                    return $this->handleRequestException($e, $url);
+                }
+                
+                // Retry on timeout or other transient errors
+                if ($attempt < $this->maxRetries) {
+                    Log::info("Request exception on attempt $attempt: " . $e->getMessage());
+                    continue;
+                }
+                
+                return $this->handleRequestException($e, $url);
+            } catch (\Exception $e) {
+                $lastException = $e;
+                
+                // DNS errors - don't retry
+                if (str_contains($message, 'dns') || str_contains($message, 'Name or service not known') || str_contains($message, 'Could not resolve host')) {
+                    return $this->createResult($url, self::STATUS_BROKEN, 0, 'DNS error: Could not resolve host');
+                }
+                
+                // Retry other exceptions
+                if ($attempt < $this->maxRetries) {
+                    continue;
+                }
+                
+                return $this->createResult($url, self::STATUS_BROKEN, 0, $e->getMessage());
+            }
+        }
+        
+        // All retries exhausted
+        if ($lastException) {
+            return $this->handleRequestException($lastException, $url);
+        }
+        
+        return $this->createResult($url, self::STATUS_BROKEN, 0, 'Max retries exceeded');
     }
 
     /**

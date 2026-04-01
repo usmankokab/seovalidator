@@ -235,13 +235,11 @@ class VerificationController extends Controller
                 }
 
                 // Run sequential validation with HTML analysis for JavaScript SPA detection
-                // Using sequential validation for consistent results (parallel can cause inconsistent results due to rate limiting)
+                // Caching is preserved across all URLs for consistent results
                 if (!empty($validationItems)) {
                     foreach ($validationItems as $i => $item) {
-                        // Clear cache to get fresh results
-                        $this->urlValidator->clearCache();
-                        
-                        // Use validate() which includes HTML analysis for JavaScript SPA detection
+                        // Use validate() which includes HTML analysis and caching
+                        // Do NOT clear cache between requests - this ensures consistent results
                         $res = $this->urlValidator->validate(
                             $item['url'],
                             $item['ourUrl'],

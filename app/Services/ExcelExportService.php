@@ -28,8 +28,8 @@ class ExcelExportService
     public function export(array $summary, array $exceptions, array $coverage): string
     {
         $spreadsheet = new Spreadsheet();
-        $spreadsheet->removeActiveSheet();
-        $sheetIndex = 0;
+        $spreadsheet->getActiveSheet()->setTitle('Temp');
+        $sheetIndex = 1;
 
         // Sheet 1: Executive Summary
         $this->addExecutiveSummary($spreadsheet, $summary, $sheetIndex++);
@@ -46,10 +46,13 @@ class ExcelExportService
         // Sheet 5: Broken URLs
         $this->addBrokenUrls($spreadsheet, $exceptions, $sheetIndex++);
 
-        // Sheet 6: Blank Posts
+        // Sheet 6: Cannot Verify URLs
+        $this->addCannotVerifyUrls($spreadsheet, $exceptions, $sheetIndex++);
+
+        // Sheet 7: Blank Posts
         $this->addBlankPosts($spreadsheet, $exceptions, $sheetIndex++);
 
-        // Sheet 7: Low Content Posts
+        // Sheet 8: Low Content Posts
         $this->addLowContentPosts($spreadsheet, $exceptions, $sheetIndex++);
         
         // Sheet 8: Post Analysis
@@ -108,21 +111,35 @@ class ExcelExportService
             $sheet->setCellValue('E' . $row, $url['status_code'] ?? '');
             $row++;
         }
+        
+        // Also Cannot Verify
+        foreach ($exceptions['cannot_verify_urls'] ?? [] as $url) {
+            $sheet->setCellValue('A' . $row, $url['source_worksheet'] ?? '');
+            $sheet->setCellValue('B' . $row, $url['original_row_number'] ?? '');
+            $sheet->setCellValue('C' . $row, $url['original_url'] ?? '');
+            $sheet->setCellValue('D' . $row, 'Cannot Verify');
+            $sheet->setCellValue('E' . $row, $url['status_code'] ?? '');
+            $sheet->setCellValue('F' . $row, $url['error'] ?? '');
+            $row++;
+        }
     }
 
     private function addExecutiveSummary(Spreadsheet $spreadsheet, array $summary, int $sheetIndex): void
     {
         $sheet = $spreadsheet->createSheet($sheetIndex);
         $sheet->setTitle('Executive Summary');
+        $overall = $summary['overall'] ?? [];
         $sheet->fromArray([
             ['Metric', 'Value'],
-            ['Total Worksheets', $summary['total_worksheets'] ?? 0],
-            ['Total Rows', $summary['total_rows'] ?? 0],
-            ['Total URLs Checked', $summary['total_urls_checked'] ?? 0],
-            ['Working URLs', $summary['working_urls'] ?? 0],
-            ['Broken URLs', $summary['broken_urls'] ?? 0],
-            ['Blank Posts', $summary['blank_posts'] ?? 0],
-            ['Low Content Posts', $summary['low_content_posts'] ?? 0]
+            ['Total Worksheets', count($summary['worksheets'] ?? [])],
+            ['Total Rows', $overall['total_rows'] ?? 0],
+            ['Total URLs Checked', $overall['total_urls_checked'] ?? 0],
+            ['Working URLs', $overall['working_urls'] ?? 0],
+            ['Broken URLs', $overall['broken_urls'] ?? 0],
+            ['Cannot Verify URLs', $overall['cannot_verify_urls'] ?? 0],
+            ['Redirected URLs', $overall['redirected_urls'] ?? 0],
+            ['Blank Posts', $overall['blank_posts'] ?? 0],
+            ['Low Content Posts', $overall['low_content_posts'] ?? 0]
         ], null, 'A1');
     }
 
@@ -132,13 +149,13 @@ class ExcelExportService
         $sheet->setTitle('Worksheet Summary');
         
         $data = [['Worksheet', 'Rows', 'URLs Checked', 'Working', 'Broken']];
-        foreach ($summary['by_worksheet'] as $wsName => $wsSummary) {
+        foreach ($summary['worksheets'] ?? [] as $wsName => $wsSummary) {
             $data[] = [
                 $wsName,
                 $wsSummary['total_rows'] ?? 0,
-                $wsSummary['total_urls'] ?? 0,
-                $wsSummary['working'] ?? 0,
-                $wsSummary['broken'] ?? 0
+                $wsSummary['total_urls_checked'] ?? 0,
+                $wsSummary['working_urls'] ?? 0,
+                $wsSummary['broken_urls'] ?? 0
             ];
         }
         $sheet->fromArray($data, null, 'A1');
@@ -190,6 +207,23 @@ class ExcelExportService
                 $url['worksheet'] ?? '',
                 $url['row_number'] ?? '',
                 $url['url'] ?? '',
+                $url['error'] ?? ''
+            ];
+        }
+        $sheet->fromArray($data, null, 'A1');
+    }
+
+    private function addCannotVerifyUrls(Spreadsheet $spreadsheet, array $exceptions, int $sheetIndex): void
+    {
+        $sheet = $spreadsheet->createSheet($sheetIndex);
+        $sheet->setTitle('Cannot Verify URLs');
+        
+        $data = [['Worksheet', 'Row', 'URL', 'Error']];
+        foreach ($exceptions['cannot_verify_urls'] ?? [] as $url) {
+            $data[] = [
+                $url['source_worksheet'] ?? '',
+                $url['original_row_number'] ?? '',
+                $url['original_url'] ?? '',
                 $url['error'] ?? ''
             ];
         }

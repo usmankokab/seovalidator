@@ -18,61 +18,37 @@ class PostAnalysisService
 
     /**
      * Analyze post content for a row
+     * ONLY check URL body content - do NOT check workbook content
+     * Blank = HTTP 200-299 AND body has 0 content
      */
     public function analyze(array &$row): void
     {
-        $postText = $row['post_content'] ?? '';
-        $source = 'workbook';
-        $text = $postText;
-        $wordCount = 0;
         $flagReason = null;
-
-        // Check if workbook content is empty
-        if (empty(trim($postText))) {
-            // Try to extract from URL
-            if (!empty($row['urls'])) {
-                $firstUrl = $row['urls'][0]['original_url'];
-                $extracted = $this->contentExtractor->extractFromUrl($firstUrl);
-                
-                if ($extracted['success']) {
-                    $text = $extracted['text'];
-                    $wordCount = $extracted['word_count'];
-                    $source = 'extracted';
-                    
-                    // Check extracted content
-                    if ($wordCount === 0) {
-                        $flagReason = 'Blank Post (Extracted)';
-                    } elseif ($wordCount < self::MIN_WORD_COUNT) {
-                        $flagReason = 'Low Content (Extracted)';
-                    }
-                } else {
-                    $flagReason = 'Blank Post (No Content Available)';
+        
+        // Only check URLs for blank detection - ignore workbook content
+        if (!empty($row['urls'])) {
+            $firstUrl = $row['urls'][0] ?? [];
+            $urlStatus = $firstUrl['status'] ?? '';
+            
+            // Only check for blank if URL returns 200-299
+            if ($urlStatus === 'Working') {
+                // Check if URL body has content
+                if (!empty($firstUrl['is_blank']) && $firstUrl['is_blank'] === true) {
+                    $flagReason = 'Blank Post';
                 }
-            } else {
-                $flagReason = 'Blank Post';
-            }
-        } else {
-            // Analyze workbook content
-            $text = $this->cleanText($postText);
-            $wordCount = $this->countWords($text);
-
-            if ($wordCount === 0) {
-                $flagReason = 'Blank Post';
-            } elseif ($wordCount < self::MIN_WORD_COUNT) {
-                $flagReason = 'Low Content';
             }
         }
-
-        // Update row with analysis results
+        
+        // Update row with analysis results - no content analysis, only URL check
         $row['post_analysis'] = [
-            'source' => $source,
-            'text' => $text,
-            'word_count' => $wordCount,
-            'excerpt' => $this->createExcerpt($text),
+            'source' => 'url_check',
+            'text' => '',
+            'word_count' => 0,
+            'excerpt' => '',
             'flag_reason' => $flagReason,
-            'is_blank' => $wordCount === 0,
-            'is_low_content' => $wordCount > 0 && $wordCount < self::MIN_WORD_COUNT,
-            'exceeds_threshold' => $wordCount >= self::MIN_WORD_COUNT
+            'is_blank' => ($flagReason === 'Blank Post'),
+            'is_low_content' => false,
+            'exceeds_threshold' => ($flagReason === null)
         ];
     }
 
@@ -145,5 +121,77 @@ class PostAnalysisService
     public function getMinWordCount(): int
     {
         return self::MIN_WORD_COUNT;
+    }
+
+    /**
+     * Detect if content looks like a JavaScript-based login/authentication UI
+     * These are typically short, lack meaningful content, and have auth-related patterns
+     */
+    private function isJavaScriptLoginUi(string $text): bool
+    {
+        if (empty($text)) {
+            return false;
+        }
+
+        // Convert to lowercase for pattern matching
+        $lowerText = strtolower($text);
+
+        // Check for common login/authentication UI patterns
+        $authPatterns = [
+            'sign in',
+            'signin',
+            'login',
+            'log in',
+            'password',
+            'email address',
+            'username',
+            'forgot password',
+            'create account',
+            'sign up',
+            'google',
+            'facebook',
+            'continue',
+            'welcome back',
+            'authenticate',
+            'session',
+            'token',
+            'oauth',
+            'verify your identity',
+            'two-factor',
+            '2fa',
+            'captcha',
+            'reCAPTCHA',
+            'human verification',
+        ];
+
+        $patternMatches = 0;
+        foreach ($authPatterns as $pattern) {
+            if (strpos($lowerText, $pattern) !== false) {
+                $patternMatches++;
+            }
+        }
+
+        // If multiple auth patterns found, likely a login UI
+        if ($patternMatches >= 2) {
+            return true;
+        }
+
+        // Check for typical login UI phrases
+        $loginPhrases = [
+            '/sign\s*in/i',
+            '/log\s*in/i',
+            '/login/i',
+            '/password/i',
+            '/email/i',
+            '/create\s*account/i',
+        ];
+
+        foreach ($loginPhrases as $phrase) {
+            if (preg_match($phrase, $text)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

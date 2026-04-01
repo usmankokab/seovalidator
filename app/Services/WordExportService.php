@@ -47,6 +47,7 @@ class WordExportService
         $this->addWorksheetSummarySection($phpWord, $summary);
         $this->addPeriodCoverageSection($phpWord, $coverage);
         $this->addBrokenUrlsSection($phpWord, $exceptions['broken_urls']);
+        $this->addCannotVerifyUrlsSection($phpWord, $exceptions['cannot_verify_urls']);
         $this->addBlankPostsSection($phpWord, $exceptions['blank_posts']);
         $this->addLowContentSection($phpWord, $exceptions['low_content_posts']);
         $this->addDetailedAnalysisSection($phpWord, $exceptions['url_checks']);
@@ -104,6 +105,7 @@ class WordExportService
             "Total URLs Checked: {$summary['overall']['total_urls_checked']}",
             "Working URLs: {$summary['overall']['working_urls']}",
             "Broken URLs: {$summary['overall']['broken_urls']}",
+            "Cannot Verify URLs: {$summary['overall']['cannot_verify_urls']}",
             "Redirected URLs: {$summary['overall']['redirected_urls']}",
             "Invalid URLs: {$summary['overall']['invalid_urls']}",
             "Blank Posts: {$summary['overall']['blank_posts']}",
@@ -203,6 +205,40 @@ class WordExportService
         $table->addCell(1000)->addText('Row', ['bold' => true]);
         $table->addCell(4000)->addText('URL', ['bold' => true]);
         $table->addCell(2000)->addText('Error', ['bold' => true]);
+
+        foreach ($urls as $url) {
+            $table->addRow(300);
+            $table->addCell(2000)->addText($url['source_worksheet']);
+            $table->addCell(1000)->addText((string)$url['original_row_number']);
+            $table->addCell(4000)->addText($url['original_url']);
+            $table->addCell(2000)->addText($url['error']);
+        }
+
+        $section->addPageBreak();
+    }
+
+    /**
+     * Add Cannot Verify URLs section
+     */
+    private function addCannotVerifyUrlsSection(PhpWord $phpWord, array $urls): void
+    {
+        $section = $phpWord->addSection();
+        
+        $section->addText('Cannot Verify URLs', ['bold' => true, 'size' => 18], ['spaceAfter' => 200]);
+
+        if (empty($urls)) {
+            $section->addText('No cannot verify URLs found.');
+            $section->addPageBreak();
+            return;
+        }
+
+        $table = $section->addTable(['borderSize' => 1, 'cellMargin' => 50]);
+        
+        $table->addRow(400);
+        $table->addCell(2000)->addText('Worksheet', ['bold' => true]);
+        $table->addCell(1000)->addText('Row', ['bold' => true]);
+        $table->addCell(4000)->addText('URL', ['bold' => true]);
+        $table->addCell(2000)->addText('Reason', ['bold' => true]);
 
         foreach ($urls as $url) {
             $table->addRow(300);

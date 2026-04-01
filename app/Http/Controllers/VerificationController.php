@@ -120,11 +120,28 @@ class VerificationController extends Controller
                 $sheet = $spreadsheet->getSheetByName($worksheetInfo['name']);
                 if (!$sheet) continue;
 
+                // Skip Meta Tags worksheet
+                if (strtolower($worksheetInfo['name']) === 'meta tags') {
+                    Log::info("Skipping Meta Tags worksheet");
+                    continue;
+                }
+
                 // Get worksheet data
                 $sheetData = $this->scannerService->getWorksheetData($sheet);
 
                 // Map headers
                 $headerMapping = $this->headerService->map($sheetData['headers']);
+
+                // Detect Validation Status column if present
+                $validationStatusColIdx = null;
+                for ($colIdx = 1; $colIdx <= 50; $colIdx++) {
+                    $colLetter = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($colIdx);
+                    $cellValue = $sheet->getCell($colLetter . '1')->getValue();
+                    if ($cellValue !== null && strtolower(trim($cellValue)) === 'validation status') {
+                        $validationStatusColIdx = $colIdx;
+                        break;
+                    }
+                }
 
                 // Skip if no URL columns found (i.e., no Submission page column)
                 if (empty($headerMapping['url_columns'])) {
@@ -186,15 +203,16 @@ class VerificationController extends Controller
                     $filterValues
                 );
 
-                // Validate URLs with content analysis
+                // Validate URLs concurrently
+                $validationItems = [];
+                $rowIndexes = [];
+                $urlIndexes = [];
+
                 foreach ($filteredRows as $rowIndex => &$filteredRow) {
                     if (!$filteredRow['included_in_scope']) continue;
 
-                    // Get Our Url and keyword from this row for content analysis
+                    // Find Our Url for this row (still needed for HTML analysis)
                     $ourUrl = null;
-                    $keyword = null;
-                    
-                    // Find Our Url column value (if we haven't extracted already)
                     foreach ($filteredRow['urls'] as $urlInfo) {
                         $colName = strtolower($urlInfo['column_name'] ?? '');
                         if (str_contains($colName, 'our url')) {
@@ -202,35 +220,64 @@ class VerificationController extends Controller
                             break;
                         }
                     }
-                    
-                    // Get keyword from row (now stored by RowNormalizationService)
                     $keyword = $filteredRow['keyword'] ?? null;
-                    
-                    foreach ($filteredRow['urls'] as $urlIndex => &$urlData) {
-                        // Pass Our Url and keyword for content analysis
-                        $urlResult = $this->urlValidator->validate(
-                            $urlData['original_url'],
-                            $ourUrl,
-                            $keyword
-                        );
-                        $filteredRows[$rowIndex]['urls'][$urlIndex]['status'] = $urlResult['status'];
-                        $filteredRows[$rowIndex]['urls'][$urlIndex]['status_code'] = $urlResult['status_code'];
-                        $filteredRows[$rowIndex]['urls'][$urlIndex]['final_url'] = $urlResult['final_url'];
-                        $filteredRows[$rowIndex]['urls'][$urlIndex]['error'] = $urlResult['error'];
-                        
-                        // Add HTML analysis results
-                        if (isset($urlResult['our_url_found'])) {
-                            $filteredRows[$rowIndex]['urls'][$urlIndex]['our_url_found'] = $urlResult['our_url_found'];
-                        }
-                        if (isset($urlResult['keyword_found'])) {
-                            $filteredRows[$rowIndex]['urls'][$urlIndex]['keyword_found'] = $urlResult['keyword_found'];
-                        }
+
+                    // Add each URL to batch
+                    foreach ($filteredRow['urls'] as $urlIdx => $urlData) {
+                        $validationItems[] = [
+                            'url' => $urlData['original_url'],
+                            'ourUrl' => $ourUrl,
+                            'keyword' => $keyword
+                        ];
+                        $rowIndexes[] = $rowIndex;
+                        $urlIndexes[] = $urlIdx;
                     }
                 }
-                unset($filteredRow, $urlData);  // Break references
+
+                // Run batch validation with HTML analysis for JavaScript SPA detection
+                // We need to use individual validate() calls to get cannot_verify status
+                if (!empty($validationItems)) {
+                    foreach ($validationItems as $i => $item) {
+                        // Clear cache to get fresh results
+                        $this->urlValidator->clearCache();
+                        
+                        // Use validate() which includes HTML analysis for JavaScript SPA detection
+                        $res = $this->urlValidator->validate(
+                            $item['url'],
+                            $item['ourUrl'],
+                            $item['keyword']
+                        );
+                        
+                        $rIdx = $rowIndexes[$i];
+                        $uIdx = $urlIndexes[$i];
+                        $filteredRows[$rIdx]['urls'][$uIdx]['status'] = $res['status'];
+                        $filteredRows[$rIdx]['urls'][$uIdx]['status_code'] = $res['status_code'];
+                        $filteredRows[$rIdx]['urls'][$uIdx]['final_url'] = $res['final_url'];
+                        $filteredRows[$rIdx]['urls'][$uIdx]['error'] = $res['error'];
+                        $filteredRows[$rIdx]['urls'][$uIdx]['cannot_verify'] = $res['cannot_verify'] ?? false;
+                        $filteredRows[$rIdx]['urls'][$uIdx]['is_blank'] = $res['is_blank'] ?? false;
+                    }
+                }
 
                 // Analyze posts
                 $this->postAnalyzer->analyzeMultiple($filteredRows);
+
+                // Write validation status to column if the column exists
+                if ($validationStatusColIdx) {
+                    foreach ($filteredRows as $rowIdx => $rowProc) {
+                        $rowNum = $rowProc['row_number'] ?? null;
+                        if (!$rowNum) continue;
+                        $statusVal = null;
+                        // Get status from first URL validated (submission page)
+                        if (!empty($rowProc['urls'])) {
+                            $firstUrl = reset($rowProc['urls']);
+                            $statusVal = $firstUrl['status'] ?? 'Unknown';
+                        }
+                        if ($statusVal) {
+                            $sheet->setCellValueByColumnAndRow($validationStatusColIdx, $rowNum, $statusVal);
+                        }
+                    }
+                }
 
                 // Store processed data
                 $processedData['by_worksheet'][$worksheetInfo['name']] = $filteredRows;
@@ -267,7 +314,13 @@ class VerificationController extends Controller
                 'filter' => $filterValues
             ];
 
+            // Generate the original Excel report (multiple sheets)
             $excelFile = $this->excelExport->export($summary, $exceptions, $coverage);
+
+            // Also save a copy of the input workbook with added validation column
+            $inputExcelFile = storage_path('app/exports/Input_Excel_File.xlsx');
+            $writer = new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($spreadsheet);
+            $writer->save($inputExcelFile);
             $wordFile = $this->wordExport->export($summary, $exceptions, $coverage, $fileName, $metadata);
             $pdfFile = $this->pdfExport->export($summary, $exceptions, $coverage, $fileName, $metadata);
 

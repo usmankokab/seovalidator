@@ -30,11 +30,15 @@ class SummaryAggregationService
                 'total_rows' => 0,
                 'total_urls_checked' => 0,
                 'working_urls' => 0,
+                'valid_urls' => 0,
                 'broken_urls' => 0,
                 'redirected_urls' => 0,
                 'invalid_urls' => 0,
+                'cannot_verify_urls' => 0,
+                'timeout_urls' => 0,
                 'blank_posts' => 0,
                 'low_content_posts' => 0,
+                'valid_posts' => 0,
                 'weeks_found' => [],
                 'date_range' => [
                     'start' => null,
@@ -64,11 +68,15 @@ class SummaryAggregationService
             $summary['overall']['total_rows'] += $worksheetSummary['total_rows'];
             $summary['overall']['total_urls_checked'] += $worksheetSummary['total_urls_checked'];
             $summary['overall']['working_urls'] += $worksheetSummary['working_urls'];
+            $summary['overall']['valid_urls'] += $worksheetSummary['valid_urls'];
             $summary['overall']['broken_urls'] += $worksheetSummary['broken_urls'];
             $summary['overall']['redirected_urls'] += $worksheetSummary['redirected_urls'];
             $summary['overall']['invalid_urls'] += $worksheetSummary['invalid_urls'];
+            $summary['overall']['cannot_verify_urls'] += $worksheetSummary['cannot_verify_urls'];
+            $summary['overall']['timeout_urls'] += $worksheetSummary['timeout_urls'];
             $summary['overall']['blank_posts'] += $worksheetSummary['blank_posts'];
             $summary['overall']['low_content_posts'] += $worksheetSummary['low_content_posts'];
+            $summary['overall']['valid_posts'] += $worksheetSummary['valid_posts'];
         }
 
         // Get week/date coverage - ensure all_rows exist first
@@ -97,11 +105,15 @@ class SummaryAggregationService
             'total_rows' => count($rows),
             'total_urls_checked' => 0,
             'working_urls' => 0,
+            'valid_urls' => 0,
             'broken_urls' => 0,
             'redirected_urls' => 0,
             'invalid_urls' => 0,
+            'cannot_verify_urls' => 0,
+            'timeout_urls' => 0,
             'blank_posts' => 0,
             'low_content_posts' => 0,
+            'valid_posts' => 0,
             'weeks' => [],
             'coverage' => [
                 'min_date' => null,
@@ -113,7 +125,9 @@ class SummaryAggregationService
             UrlValidationService::STATUS_WORKING => 'working_urls',
             UrlValidationService::STATUS_BROKEN => 'broken_urls',
             UrlValidationService::STATUS_REDIRECTED => 'redirected_urls',
-            UrlValidationService::STATUS_INVALID => 'invalid_urls'
+            UrlValidationService::STATUS_INVALID => 'invalid_urls',
+            UrlValidationService::STATUS_CANNOT_VERIFY => 'cannot_verify_urls',
+            UrlValidationService::STATUS_TIMEOUT => 'timeout_urls'
         ];
 
         foreach ($rows as $row) {
@@ -129,13 +143,19 @@ class SummaryAggregationService
                 $summary[$key]++;
             }
 
-            // Count posts
+            // Count posts - valid_posts for post analysis (posts with content)
             if (isset($row['post_analysis'])) {
                 if ($row['post_analysis']['is_blank']) {
                     $summary['blank_posts']++;
                 } elseif ($row['post_analysis']['is_low_content']) {
                     $summary['low_content_posts']++;
+                } else {
+                    // Not blank, not low content - count as valid
+                    $summary['valid_posts']++;
                 }
+            } else {
+                // No post_analysis means it's valid (has content)
+                $summary['valid_posts']++;
             }
 
             // Collect weeks
@@ -153,6 +173,14 @@ class SummaryAggregationService
                 }
             }
         }
+
+        // Calculate valid_urls AFTER all rows are processed
+        // Valid = Checked - Broken - Blank - Low - Redirected - Timeout
+        $checked = $summary['total_urls_checked'];
+        $invalidCount = $summary['broken_urls'] + $summary['redirected_urls'] + 
+                        $summary['timeout_urls'] + $summary['blank_posts'] + 
+                        $summary['low_content_posts'];
+        $summary['valid_urls'] = max(0, $checked - $invalidCount);
 
         $summary['weeks'] = array_keys($summary['weeks']);
 
@@ -201,6 +229,7 @@ class SummaryAggregationService
     {
         $exceptions = [
             'broken_urls' => [],
+            'cannot_verify_urls' => [],
             'blank_posts' => [],
             'low_content_posts' => [],
             'url_checks' => []
@@ -233,6 +262,9 @@ class SummaryAggregationService
             foreach ($row['urls'] as $urlIndex => $url) {
                 if (in_array($url['status'], [UrlValidationService::STATUS_BROKEN, UrlValidationService::STATUS_TIMEOUT])) {
                     $exceptions['broken_urls'][] = $this->formatUrlException($row, $url);
+                }
+                if ($url['status'] === UrlValidationService::STATUS_CANNOT_VERIFY) {
+                    $exceptions['cannot_verify_urls'][] = $this->formatUrlException($row, $url);
                 }
                 $exceptions['url_checks'][] = $this->formatUrlException($row, $url);
             }

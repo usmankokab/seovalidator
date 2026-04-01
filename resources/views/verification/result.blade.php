@@ -72,51 +72,69 @@
         <div class="summary-card">
             <h5 class="mb-3">Executive Summary</h5>
             <div class="row">
-                <div class="col-md-3">
+                <div class="col-md-2">
                     <div class="stat-card">
                         <div class="stat-value">{{ $results['summary']['overall']['total_rows'] }}</div>
                         <div class="stat-label">Total Rows</div>
                     </div>
                 </div>
-                <div class="col-md-3">
+                <div class="col-md-2">
                     <div class="stat-card">
                         <div class="stat-value">{{ $results['summary']['overall']['total_urls_checked'] }}</div>
                         <div class="stat-label">URLs Checked</div>
                     </div>
                 </div>
-                <div class="col-md-3">
+                <div class="col-md-2">
                     <div class="stat-card">
-                        <div class="stat-value text-success">{{ $results['summary']['overall']['working_urls'] }}</div>
+                        <div class="stat-value text-success">{{ $results['summary']['overall']['working_urls'] + $results['summary']['overall']['cannot_verify_urls'] }}</div>
                         <div class="stat-label">Working</div>
                     </div>
                 </div>
-                <div class="col-md-3">
+                <div class="col-md-2">
+                    <div class="stat-card">
+                        <div class="stat-value text-primary">{{ $results['summary']['overall']['valid_urls'] }}</div>
+                        <div class="stat-label">Valid URLs</div>
+                    </div>
+                </div>
+                <div class="col-md-2">
                     <div class="stat-card">
                         <div class="stat-value text-danger">{{ $results['summary']['overall']['broken_urls'] }}</div>
                         <div class="stat-label">Broken</div>
                     </div>
                 </div>
-            </div>
-            <div class="row mt-3">
-                <div class="col-md-3">
+                <div class="col-md-2">
                     <div class="stat-card">
                         <div class="stat-value">{{ $results['summary']['overall']['redirected_urls'] }}</div>
                         <div class="stat-label">Redirected</div>
                     </div>
                 </div>
-                <div class="col-md-3">
+            </div>
+            <div class="row mt-3">
+                <div class="col-md-2">
+                    <div class="stat-card">
+                        <div class="stat-value">{{ $results['summary']['overall']['cannot_verify_urls'] }}</div>
+                        <div class="stat-label">Cannot Verify</div>
+                    </div>
+                </div>
+                <div class="col-md-2">
+                    <div class="stat-card">
+                        <div class="stat-value">{{ $results['summary']['overall']['timeout_urls'] }}</div>
+                        <div class="stat-label">Timeout</div>
+                    </div>
+                </div>
+                <div class="col-md-2">
                     <div class="stat-card">
                         <div class="stat-value">{{ $results['summary']['overall']['blank_posts'] }}</div>
                         <div class="stat-label">Blank Posts</div>
                     </div>
                 </div>
-                <div class="col-md-3">
+                <div class="col-md-2">
                     <div class="stat-card">
                         <div class="stat-value text-warning">{{ $results['summary']['overall']['low_content_posts'] }}</div>
                         <div class="stat-label">Low Content</div>
                     </div>
                 </div>
-                <div class="col-md-3">
+                <div class="col-md-2">
                     <div class="stat-card">
                         <div class="stat-value">{{ count($results['summary']['overall']['weeks_found']) }}</div>
                         <div class="stat-label">Weeks Found</div>
@@ -134,11 +152,15 @@
                         <tr>
                             <th>Worksheet</th>
                             <th>Rows</th>
-                            <th>URLs</th>
                             <th>Working</th>
+                            <th>Cannot Verify</th>
+                            <th>Valid</th>
                             <th>Broken</th>
                             <th>Blank</th>
                             <th>Low</th>
+                            <th>Redirected</th>
+                            <th>Timeout</th>
+                            <th>Weeks</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -146,11 +168,15 @@
                         <tr>
                             <td>{{ $name }}</td>
                             <td>{{ $data['total_rows'] }}</td>
-                            <td>{{ $data['total_urls_checked'] }}</td>
-                            <td>{{ $data['working_urls'] }}</td>
+                            <td>{{ $data['working_urls'] + $data['cannot_verify_urls'] }}</td>
+                            <td>{{ $data['cannot_verify_urls'] }}</td>
+                            <td>{{ $data['valid_urls'] }}</td>
                             <td>{{ $data['broken_urls'] }}</td>
                             <td>{{ $data['blank_posts'] }}</td>
                             <td>{{ $data['low_content_posts'] }}</td>
+                            <td>{{ $data['redirected_urls'] }}</td>
+                            <td>{{ $data['timeout_urls'] }}</td>
+                            <td>{{ count($data['weeks']) }}</td>
                         </tr>
                         @endforeach
                     </tbody>
@@ -193,27 +219,7 @@
             </div>
         </div>
 
-        <!-- Exceptions Summary -->
-        <div class="row">
-            <div class="col-md-4">
-                <div class="summary-card">
-                    <h5 class="mb-3 text-danger">Broken URLs</h5>
-                    <div class="stat-value">{{ count($results['exceptions']['broken_urls']) }}</div>
-                </div>
-            </div>
-            <div class="col-md-4">
-                <div class="summary-card">
-                    <h5 class="mb-3 text-warning">Blank Posts</h5>
-                    <div class="stat-value">{{ count($results['exceptions']['blank_posts']) }}</div>
-                </div>
-            </div>
-            <div class="col-md-4">
-                <div class="summary-card">
-                    <h5 class="mb-3 text-warning">Low Content</h5>
-                    <div class="stat-value">{{ count($results['exceptions']['low_content_posts']) }}</div>
-                </div>
-            </div>
-        </div>
+        <!-- Exceptions Summary - REMOVED PER USER REQUEST -->
 
         <div class="text-center mt-4 mb-4">
             <a href="{{ route('verification.index') }}" class="btn btn-primary">Run Another Verification</a>

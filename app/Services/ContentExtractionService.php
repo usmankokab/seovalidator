@@ -90,12 +90,9 @@ class ContentExtractionService
         // Remove excessive whitespace
         $text = preg_replace('/\s+/', ' ', $text);
         
-        // Remove common navigation words and noise
-        $text = str_replace([
-            'Navigation', 'Menu', 'Search', 'Skip to content',
-            'Home', 'About', 'Contact', 'Privacy', 'Terms'
-        ], '', $text);
-
+        // Only remove truly irrelevant content, not actual page content
+        // Removed aggressive nav word removal that was causing false blanks
+        
         return trim($text);
     }
 

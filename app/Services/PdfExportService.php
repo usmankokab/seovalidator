@@ -83,6 +83,7 @@ class PdfExportService
         $html .= "<p><strong>Total URLs Checked:</strong> {$summary['overall']['total_urls_checked']}</p>";
         $html .= "<p><strong>Working URLs:</strong> {$summary['overall']['working_urls']}</p>";
         $html .= "<p><strong>Broken URLs:</strong> {$summary['overall']['broken_urls']}</p>";
+        $html .= "<p><strong>Cannot Verify URLs:</strong> {$summary['overall']['cannot_verify_urls']}</p>";
         $html .= "<p><strong>Redirected URLs:</strong> {$summary['overall']['redirected_urls']}</p>";
         $html .= "<p><strong>Invalid URLs:</strong> {$summary['overall']['invalid_urls']}</p>";
         $html .= "<p><strong>Blank Posts:</strong> {$summary['overall']['blank_posts']}</p>";
@@ -147,6 +148,32 @@ class PdfExportService
             
             $count = 0;
             foreach ($exceptions['broken_urls'] as $url) {
+                if ($count >= 50) break;
+                $html .= '<tr>';
+                $html .= '<td>' . htmlspecialchars($url['source_worksheet']) . '</td>';
+                $html .= '<td>' . $url['original_row_number'] . '</td>';
+                $html .= '<td>' . htmlspecialchars(mb_substr($url['original_url'], 0, 40)) . '</td>';
+                $html .= '<td>' . htmlspecialchars($url['error']) . '</td>';
+                $html .= '</tr>';
+                $count++;
+            }
+            
+            $html .= '</table>';
+            $html .= '</body></html>';
+            
+            $mpdf->WriteHTML($html);
+        }
+
+        // Cannot Verify URLs
+        if (!empty($exceptions['cannot_verify_urls'])) {
+            $mpdf->AddPage();
+            $html = '<html><body>';
+            $html .= '<h2>Cannot Verify URLs</h2>';
+            $html .= '<table>';
+            $html .= '<tr><th>Worksheet</th><th>Row</th><th>URL</th><th>Reason</th></tr>';
+            
+            $count = 0;
+            foreach ($exceptions['cannot_verify_urls'] as $url) {
                 if ($count >= 50) break;
                 $html .= '<tr>';
                 $html .= '<td>' . htmlspecialchars($url['source_worksheet']) . '</td>';

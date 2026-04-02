@@ -23,15 +23,13 @@
             padding: 15px;
             border: 2px solid #dee2e6;
             border-radius: 8px;
-            margin-bottom: 10px;
+            margin-bottom: 20px;
             cursor: pointer;
             transition: all 0.3s;
         }
         .mode-option:hover { border-color: #0d6efd; }
         .mode-option.selected { border-color: #0d6efd; background-color: #e7f1ff; }
         .mode-option input { display: none; }
-        .filter-fields { display: none; }
-        .filter-fields.active { display: block; }
     </style>
 </head>
 <body>
@@ -77,67 +75,24 @@
                     <div class="mb-4">
                         <label class="form-label"><strong>Report Mode</strong></label>
                         
-                        <div class="mode-option" onclick="selectMode('complete')">
+                        <div class="mode-option" onclick="selectMode(this, 'complete')">
                             <input type="radio" name="mode" value="complete" checked>
                             <strong>Complete Workbook</strong>
                             <p class="text-muted small mb-0">Analyze all worksheets and rows</p>
                         </div>
                         
-                        <div class="mode-option" onclick="selectMode('single_week')">
+                        <div class="mode-option" onclick="selectMode(this, 'single_week')">
                             <input type="radio" name="mode" value="single_week">
                             <strong>Single Week</strong>
                             <p class="text-muted small mb-0">Filter by specific week</p>
                         </div>
                         
-                        <div class="mode-option" onclick="selectMode('date_range')">
+                        <div class="mode-option" onclick="selectMode(this, 'date_range')">
                             <input type="radio" name="mode" value="date_range">
                             <strong>Date Range</strong>
                             <p class="text-muted small mb-0">Filter by start and end date</p>
                         </div>
                         @error('mode')
-                            <div class="text-danger small mt-1">{{ $message }}</div>
-                        @enderror
-                    </div>
-
-                    <!-- Advanced Filters (Hidden by default) -->
-                    <details class="mb-4">
-                        <summary class="text-muted small" style="cursor:pointer;">Advanced Options</summary>
-                        
-                        <div class="mt-2 p-3 bg-light rounded">
-                            <div class="mb-3">
-                                <label class="form-label small">Worksheet Name</label>
-                                <input type="text" name="worksheet" class="form-control form-control-sm" placeholder="e.g., High Quality Submission">
-                                <small class="text-muted">Leave empty to process all worksheets</small>
-                            </div>
-                            <div class="mb-3">
-                                <label class="form-label small">URL Column</label>
-                                <input type="text" name="url_column" class="form-control form-control-sm" placeholder="e.g., Submission Page">
-                                <small class="text-muted">Leave empty to validate all URL columns</small>
-                            </div>
-                        </div>
-                    </details>
-
-                    <!-- Filter Fields -->
-                    <div class="filter-fields mb-4" id="weekFilter">
-                        <label class="form-label">Week</label>
-                        <input type="text" name="week" class="form-control" placeholder="e.g., Week 1, 1, Week 12">
-                        @error('week')
-                            <div class="text-danger small mt-1">{{ $message }}</div>
-                        @enderror
-                    </div>
-
-                    <div class="filter-fields mb-4" id="dateFilter">
-                        <div class="row">
-                            <div class="col">
-                                <label class="form-label">Start Date</label>
-                                <input type="date" name="start_date" class="form-control">
-                            </div>
-                            <div class="col">
-                                <label class="form-label">End Date</label>
-                                <input type="date" name="end_date" class="form-control">
-                            </div>
-                        </div>
-                        @error('start_date')
                             <div class="text-danger small mt-1">{{ $message }}</div>
                         @enderror
                     </div>
@@ -191,31 +146,73 @@
         });
 
         // Mode selection
-        function selectMode(mode) {
-            document.querySelectorAll('.mode-option').forEach(el => el.classList.remove('selected'));
-            event.currentTarget.classList.add('selected');
+        function selectMode(element, mode) {
+            // Remove selected class from all mode options
+            document.querySelectorAll('.mode-option').forEach(function(el) {
+                el.classList.remove('selected');
+            });
             
-            document.getElementById('weekFilter').classList.remove('active');
-            document.getElementById('dateFilter').classList.remove('active');
+            // Check if this element already has a filter and is currently selected
+            var existingFilter = element.querySelector('.dynamic-filter');
+            var isAlreadySelected = element.classList.contains('selected');
             
-            if (mode === 'single_week') {
-                document.getElementById('weekFilter').classList.add('active');
-            } else if (mode === 'date_range') {
-                document.getElementById('dateFilter').classList.add('active');
+            // Remove ALL existing dynamic filters from the entire form
+            document.querySelectorAll('.dynamic-filter').forEach(function(filter) {
+                filter.remove();
+            });
+            
+            // If clicking on already selected element, just toggle off and return
+            if (isAlreadySelected) {
+                return;
             }
             
-            document.querySelector(`input[name="mode"][value="${mode}"]`).checked = true;
+            // Add selected class to clicked element
+            element.classList.add('selected');
+            
+            // Add filter field dynamically for the selected mode
+            if (mode === 'complete') {
+                var filterContainer = document.createElement('div');
+                filterContainer.className = 'mb-3 dynamic-filter';
+                filterContainer.innerHTML = '<input type="text" name="worksheet" class="form-control form-control-sm" placeholder="e.g., High Quality Submission">';
+                element.parentNode.insertBefore(filterContainer, element.nextSibling);
+            } else if (mode === 'single_week') {
+                var filterContainer = document.createElement('div');
+                filterContainer.className = 'mb-3 dynamic-filter';
+                filterContainer.innerHTML = '<input type="number" name="week" class="form-control form-control-sm" min="1" placeholder="Enter week number (e.g., 4 = 4th week)">';
+                element.parentNode.insertBefore(filterContainer, element.nextSibling);
+            } else if (mode === 'date_range') {
+                var filterContainer = document.createElement('div');
+                filterContainer.className = 'mb-3 dynamic-filter';
+                filterContainer.innerHTML = '<div class="row g-2"><div class="col-6"><input type="date" name="start_date" class="form-control form-control-sm" placeholder="Start Date"></div><div class="col-6"><input type="date" name="end_date" class="form-control form-control-sm" placeholder="End Date"></div></div>';
+                element.parentNode.insertBefore(filterContainer, element.nextSibling);
+            }
+            
+            // Check the radio button
+            var radio = element.querySelector('input[type="radio"]');
+            if (radio) {
+                radio.checked = true;
+            }
         }
 
-        // Validate dates
+        // Validate dates and week number
         document.querySelector('form').addEventListener('submit', function(e) {
             const mode = document.querySelector('input[name="mode"]:checked').value;
             const startDate = document.querySelector('input[name="start_date"]').value;
             const endDate = document.querySelector('input[name="end_date"]').value;
+            const weekInput = document.querySelector('input[name="week"]');
             
             if (mode === 'date_range' && startDate && endDate && startDate > endDate) {
                 e.preventDefault();
                 alert('End date must be after start date');
+            }
+            
+            if (mode === 'single_week' && weekInput) {
+                const weekValue = weekInput.value.trim();
+                // Allow empty, but if filled must be a positive number
+                if (weekValue && (!/^\d+$/.test(weekValue) || parseInt(weekValue) < 1)) {
+                    e.preventDefault();
+                    alert('Please enter a valid week number (e.g., 1, 2, 3...)');
+                }
             }
         });
     </script>

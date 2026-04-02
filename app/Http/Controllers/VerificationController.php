@@ -98,11 +98,62 @@ class VerificationController extends Controller
             $this->urlValidator->setWorkbookHash($workbookHash);
             Log::info("Workbook hash: $workbookHash - will use persistent caching");
 
-            // Check if we have cached summary stats
-            $cachedSummary = $this->urlValidator->getCachedSummary($workbookHash);
+            // Check if we have cached summary stats - but only for complete mode without filters
+            $reportMode = $request->input('mode');
+            $hasFilters = ($reportMode !== 'complete') ||
+                         !empty($request->input('worksheet')) ||
+                         !empty($request->input('url_column'));
+
+            $cachedSummary = null;
+            if (!$hasFilters) {
+                $cachedSummary = $this->urlValidator->getCachedSummary($workbookHash);
+            }
+
+            if (!$hasFilters) {
+                $cachedSummary = $this->urlValidator->getCachedSummary($workbookHash);
+            }
+
             if ($cachedSummary !== null) {
                 Log::info("Using cached summary stats - skipping URL validation");
-                
+
+                // Ensure cached summary has proper structure for view
+                if (!isset($cachedSummary['overall'])) {
+                    Log::info("Cached summary missing 'overall' key - adding default structure");
+                    $cachedSummary['overall'] = [
+                        'total_rows' => 0,
+                        'total_urls_checked' => 0,
+                        'working_urls' => 0,
+                        'valid_urls' => 0,
+                        'broken_urls' => 0,
+                        'redirected_urls' => 0,
+                        'invalid_urls' => 0,
+                        'cannot_verify_urls' => 0,
+                        'timeout_urls' => 0,
+                        'blank_posts' => 0,
+                        'low_content_posts' => 0,
+                        'valid_posts' => 0,
+                        'weeks_found' => [],
+                        'unique_domains' => 0,
+                        'date_range' => [
+                            'start' => null,
+                            'end' => null
+                        ]
+                    ];
+                }
+
+                if (!isset($cachedSummary['worksheets'])) {
+                    Log::info("Cached summary missing 'worksheets' key - adding default structure");
+                    $cachedSummary['worksheets'] = [];
+                }
+
+                if (!isset($cachedSummary['mode'])) {
+                    $cachedSummary['mode'] = 'complete';
+                }
+
+                if (!isset($cachedSummary['filter'])) {
+                    $cachedSummary['filter'] = [];
+                }
+
                 // Restore results from cached summary
                 $results = [
                     'excel' => $cachedSummary['excel_file'] ?? 'cached_excel.xlsx',
@@ -407,17 +458,6 @@ class VerificationController extends Controller
      */
     public function clearCache(Request $request)
     {
-        // Get the workbook hash if provided
-        $workbookHash = $request->input('hash');
-        
-        if ($workbookHash) {
-            // Clear summary cache for specific workbook
-            $summaryCachePath = storage_path('app/exports/summary_cache_' . $workbookHash . '.json');
-            if (file_exists($summaryCachePath)) {
-                unlink($summaryCachePath);
-            }
-        }
-        
         $this->urlValidator->clearPersistentCache();
         return back()->with('success', 'Cache cleared successfully');
     }

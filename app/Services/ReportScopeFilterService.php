@@ -59,11 +59,21 @@ class ReportScopeFilterService
             return false;
         }
 
-        $rowWeekNormalized = $row['week']['normalized'] ?? '';
-        $requestedWeekNormalized = $this->normalizeWeekRequest($requestedWeek);
+        // Extract just the number from the user's input (e.g., "4" -> "4")
+        $requestedWeekNumber = preg_replace('/[^0-9]/', '', $requestedWeek);
+        
+        if (empty($requestedWeekNumber)) {
+            return true; // If no valid number, don't filter
+        }
 
-        return stripos($rowWeekNormalized, $requestedWeekNormalized) !== false ||
-               $rowWeekNormalized === $requestedWeekNormalized;
+        // Get the row's week number from normalized value
+        $rowWeekNormalized = $row['week']['normalized'] ?? '';
+        
+        // Extract number from row's week (e.g., "week 1" -> "1", "1st week" -> "1")
+        $rowWeekNumber = preg_replace('/[^0-9]/', '', $rowWeekNormalized);
+
+        // Compare the numbers
+        return $rowWeekNumber === $requestedWeekNumber;
     }
 
     /**

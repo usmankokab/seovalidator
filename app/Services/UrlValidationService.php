@@ -19,6 +19,8 @@ class UrlValidationService
     private array $urlCache = [];
     private int $timeout = 10;
     private int $maxRetries = 2;
+    private ?string $workbookHash = null;
+    private ?string $cacheFilePath = null;
 
     // Status constants as per SRS Section 7.4
     public const STATUS_WORKING = 'Working';
@@ -504,6 +506,73 @@ class UrlValidationService
      */
     public function clearCache(): void
     {
+        $this->urlCache = [];
+    }
+
+    /**
+     * Set workbook hash for persistent caching
+     * @param string $hash MD5 hash of the workbook file content
+     */
+    public function setWorkbookHash(string $hash): void
+    {
+        $this->workbookHash = $hash;
+        $this->cacheFilePath = storage_path('app/exports/cache_' . $hash . '.json');
+        $this->loadPersistentCache();
+    }
+
+    /**
+     * Load persistent cache from file
+     */
+    private function loadPersistentCache(): void
+    {
+        if (!$this->cacheFilePath || !file_exists($this->cacheFilePath)) {
+            return;
+        }
+
+        try {
+            $content = file_get_contents($this->cacheFilePath);
+            $data = json_decode($content, true);
+            
+            if (is_array($data) && !empty($data)) {
+                $this->urlCache = $data;
+                Log::info("Loaded " . count($this->urlCache) . " cached results from " . basename($this->cacheFilePath));
+            }
+        } catch (\Exception $e) {
+            Log::warning("Failed to load persistent cache: " . $e->getMessage());
+        }
+    }
+
+    /**
+     * Save persistent cache to file
+     */
+    public function savePersistentCache(): void
+    {
+        if (!$this->cacheFilePath || empty($this->urlCache)) {
+            return;
+        }
+
+        try {
+            $dir = dirname($this->cacheFilePath);
+            if (!is_dir($dir)) {
+                mkdir($dir, 0755, true);
+            }
+
+            file_put_contents($this->cacheFilePath, json_encode($this->urlCache, JSON_PRETTY_PRINT));
+            Log::info("Saved " . count($this->urlCache) . " results to persistent cache: " . basename($this->cacheFilePath));
+        } catch (\Exception $e) {
+            Log::warning("Failed to save persistent cache: " . $e->getMessage());
+        }
+    }
+
+    /**
+     * Clear persistent cache for current workbook
+     */
+    public function clearPersistentCache(): void
+    {
+        if ($this->cacheFilePath && file_exists($this->cacheFilePath)) {
+            unlink($this->cacheFilePath);
+            Log::info("Deleted persistent cache: " . basename($this->cacheFilePath));
+        }
         $this->urlCache = [];
     }
 

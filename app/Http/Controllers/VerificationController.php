@@ -93,6 +93,11 @@ class VerificationController extends Controller
             $workbookPath = $uploadResult['file_path'];
             $fileName = $uploadResult['file_name'];
 
+            // Calculate workbook hash for persistent caching
+            $workbookHash = md5_file($workbookPath);
+            $this->urlValidator->setWorkbookHash($workbookHash);
+            Log::info("Workbook hash: $workbookHash - will use persistent caching");
+
             // 2. Load workbook
             $spreadsheet = $this->uploadService->load($workbookPath);
             if (!$spreadsheet) {
@@ -255,6 +260,9 @@ class VerificationController extends Controller
                         $filteredRows[$rIdx]['urls'][$uIdx]['cannot_verify'] = $res['cannot_verify'] ?? false;
                         $filteredRows[$rIdx]['urls'][$uIdx]['is_blank'] = $res['is_blank'] ?? false;
                     }
+                    
+                    // Save persistent cache after all validations
+                    $this->urlValidator->savePersistentCache();
                 }
 
                 // Analyze posts
@@ -375,5 +383,14 @@ class VerificationController extends Controller
         }
 
         return response()->download($filePath);
+    }
+
+    /**
+     * Clear persistent cache
+     */
+    public function clearCache(Request $request)
+    {
+        $this->urlValidator->clearPersistentCache();
+        return back()->with('success', 'Cache cleared successfully');
     }
 }

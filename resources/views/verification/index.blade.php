@@ -173,7 +173,7 @@
             if (mode === 'complete') {
                 var filterContainer = document.createElement('div');
                 filterContainer.className = 'mb-3 dynamic-filter';
-                filterContainer.innerHTML = '<input type="text" name="worksheet" class="form-control form-control-sm" placeholder="e.g., High Quality Submission">';
+                filterContainer.innerHTML = '<input type="text" name="worksheet" class="form-control form-control-sm" placeholder="Enter worksheet name (required)" required>';
                 element.parentNode.insertBefore(filterContainer, element.nextSibling);
             } else if (mode === 'single_week') {
                 var filterContainer = document.createElement('div');
@@ -194,24 +194,33 @@
             }
         }
 
-        // Validate dates and week number
+        // Validate dates, week number, and worksheet name
         document.querySelector('form').addEventListener('submit', function(e) {
             const mode = document.querySelector('input[name="mode"]:checked').value;
             const startDate = document.querySelector('input[name="start_date"]').value;
             const endDate = document.querySelector('input[name="end_date"]').value;
             const weekInput = document.querySelector('input[name="week"]');
-            
+            const worksheetInput = document.querySelector('input[name="worksheet"]');
+
             if (mode === 'date_range' && startDate && endDate && startDate > endDate) {
                 e.preventDefault();
                 alert('End date must be after start date');
             }
-            
+
             if (mode === 'single_week' && weekInput) {
                 const weekValue = weekInput.value.trim();
                 // Allow empty, but if filled must be a positive number
                 if (weekValue && (!/^\d+$/.test(weekValue) || parseInt(weekValue) < 1)) {
                     e.preventDefault();
                     alert('Please enter a valid week number (e.g., 1, 2, 3...)');
+                }
+            }
+
+            if (mode === 'complete' && worksheetInput) {
+                const worksheetValue = worksheetInput.value.trim();
+                if (!worksheetValue) {
+                    e.preventDefault();
+                    alert('Please enter a worksheet name for Complete Workbook mode.');
                 }
             }
         });

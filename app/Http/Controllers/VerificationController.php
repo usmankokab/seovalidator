@@ -77,6 +77,7 @@ class VerificationController extends Controller
         $request->validate([
             'workbook' => 'required|file|mimes:xlsx|max:51200',
             'mode' => 'required|in:complete,single_week,date_range',
+            'worksheet' => 'required_if:mode,complete',
             'week' => 'nullable|required_if:mode,single_week',
             'start_date' => 'nullable|required_if:mode,date_range',
             'end_date' => 'nullable|required_if:mode,date_range'
@@ -98,10 +99,9 @@ class VerificationController extends Controller
             $this->urlValidator->setWorkbookHash($workbookHash);
             Log::info("Workbook hash: $workbookHash - will use persistent caching");
 
-            // Check if we have cached summary stats - but only for complete mode without filters
+            // Check if we have cached summary stats - but only for complete mode without worksheet filter
             $reportMode = $request->input('mode');
             $hasFilters = ($reportMode !== 'complete') ||
-                         !empty($request->input('worksheet')) ||
                          !empty($request->input('url_column'));
 
             $cachedSummary = null;

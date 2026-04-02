@@ -390,17 +390,9 @@ class VerificationController extends Controller
         $currentBatch = [];
         $usedDomains = [];
         
-        // First, separate items into those with cache and those without
-        $cachedItems = [];
-        $uncachedItems = [];
-        
         foreach ($validationItems as $i => $item) {
             $url = $item['url'] ?? '';
             $domain = $this->extractDomain($url);
-            
-            // Check if URL is already in persistent cache
-            $normalizedUrl = strtolower(trim($url));
-            // We'll check cache during validation
             
             if (!empty($domain)) {
                 // Check if we can add to current batch (domain not used in current batch)
@@ -424,6 +416,19 @@ class VerificationController extends Controller
                     $currentBatch[] = ['index' => $i, 'item' => $item, 'domain' => $domain];
                     $usedDomains[$domain] = true;
                 }
+            } else {
+                // Invalid URL (no domain) - add to current batch or start new one
+                // These will be marked as 'Invalid' by the validator
+                if (count($currentBatch) > 0 && count($currentBatch) < $batchSize) {
+                    $currentBatch[] = ['index' => $i, 'item' => $item, 'domain' => ''];
+                } else {
+                    if (!empty($currentBatch)) {
+                        $batches[] = $currentBatch;
+                        $currentBatch = [];
+                        $usedDomains = [];
+                    }
+                    $currentBatch[] = ['index' => $i, 'item' => $item, 'domain' => ''];
+                }
             }
         }
         
@@ -442,10 +447,10 @@ class VerificationController extends Controller
             $batchItems = array_map(fn($b) => $b['item'], $batch);
             $batchResults = $this->urlValidator->batchValidateWithAnalysis($batchItems, 10);
             
-            // Map results back to filteredRows
-            foreach ($batch as $batchItem) {
+            // Map results back to filteredRows - use batch array index, not original index
+            foreach ($batch as $batchIdx => $batchItem) {
                 $i = $batchItem['index'];
-                $res = $batchResults[$i] ?? [];
+                $res = $batchResults[$batchIdx] ?? [];
                 
                 $rIdx = $rowIndexes[$i];
                 $uIdx = $urlIndexes[$i];

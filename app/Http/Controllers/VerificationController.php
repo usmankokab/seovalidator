@@ -109,10 +109,6 @@ class VerificationController extends Controller
                 $cachedSummary = $this->urlValidator->getCachedSummary($workbookHash);
             }
 
-            if (!$hasFilters) {
-                $cachedSummary = $this->urlValidator->getCachedSummary($workbookHash);
-            }
-
             if ($cachedSummary !== null) {
                 Log::info("Using cached summary stats - skipping URL validation");
 
@@ -347,6 +343,22 @@ class VerificationController extends Controller
                     $processedData['all_rows'],
                     $filteredRows
                 );
+            }
+
+            // Check if any rows are included in scope (for filtered modes)
+            if ($reportMode === 'single_week') {
+                $hasIncludedRows = false;
+                foreach ($processedData['all_rows'] as $row) {
+                    if (isset($row['included_in_scope']) && $row['included_in_scope']) {
+                        $hasIncludedRows = true;
+                        break;
+                    }
+                }
+
+                if (!$hasIncludedRows) {
+                    $requestedWeek = $request->input('week');
+                    return back()->with('error', "No data found for week {$requestedWeek}. Please try a different week number.");
+                }
             }
 
             // 5. Generate summary

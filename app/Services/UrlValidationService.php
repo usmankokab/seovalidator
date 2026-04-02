@@ -565,6 +565,52 @@ class UrlValidationService
     }
 
     /**
+     * Get cached summary stats
+     */
+    public function getCachedSummary(string $workbookHash): ?array
+    {
+        $summaryCachePath = storage_path('app/exports/summary_cache_' . $workbookHash . '.json');
+        
+        if (!file_exists($summaryCachePath)) {
+            return null;
+        }
+
+        try {
+            $content = file_get_contents($summaryCachePath);
+            $cached = json_decode($content, true);
+            
+            if (is_array($cached) && !empty($cached)) {
+                Log::info("Loaded cached summary stats");
+                return $cached;
+            }
+        } catch (\Exception $e) {
+            Log::warning("Failed to load cached summary: " . $e->getMessage());
+        }
+        
+        return null;
+    }
+
+    /**
+     * Save summary stats to cache
+     */
+    public function saveSummaryCache(string $workbookHash, array $summary): void
+    {
+        $summaryCachePath = storage_path('app/exports/summary_cache_' . $workbookHash . '.json');
+        
+        try {
+            $dir = dirname($summaryCachePath);
+            if (!is_dir($dir)) {
+                mkdir($dir, 0755, true);
+            }
+
+            file_put_contents($summaryCachePath, json_encode($summary, JSON_PRETTY_PRINT));
+            Log::info("Saved summary stats to cache");
+        } catch (\Exception $e) {
+            Log::warning("Failed to save summary cache: " . $e->getMessage());
+        }
+    }
+
+    /**
      * Clear persistent cache for current workbook
      */
     public function clearPersistentCache(): void

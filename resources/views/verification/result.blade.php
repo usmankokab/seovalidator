@@ -86,8 +86,14 @@
                 </div>
                 <div class="col-md-2">
                     <div class="stat-card">
-                        <div class="stat-value text-success">{{ $results['summary']['overall']['working_urls'] + $results['summary']['overall']['cannot_verify_urls'] }}</div>
+                        <div class="stat-value text-success">{{ $results['summary']['overall']['working_urls'] }}</div>
                         <div class="stat-label">Working</div>
+                    </div>
+                </div>
+                <div class="col-md-2">
+                    <div class="stat-card">
+                        <div class="stat-value">{{ $results['summary']['overall']['cannot_verify_urls'] }}</div>
+                        <div class="stat-label">Cannot Verify</div>
                     </div>
                 </div>
                 <div class="col-md-2">
@@ -102,18 +108,12 @@
                         <div class="stat-label">Broken</div>
                     </div>
                 </div>
-                <div class="col-md-2">
-                    <div class="stat-card">
-                        <div class="stat-value">{{ $results['summary']['overall']['redirected_urls'] }}</div>
-                        <div class="stat-label">Redirected</div>
-                    </div>
-                </div>
             </div>
             <div class="row mt-3">
                 <div class="col-md-2">
                     <div class="stat-card">
-                        <div class="stat-value">{{ $results['summary']['overall']['cannot_verify_urls'] }}</div>
-                        <div class="stat-label">Cannot Verify</div>
+                        <div class="stat-value">{{ $results['summary']['overall']['redirected_urls'] }}</div>
+                        <div class="stat-label">Redirected</div>
                     </div>
                 </div>
                 <div class="col-md-2">
@@ -138,6 +138,12 @@
                     <div class="stat-card">
                         <div class="stat-value">{{ count($results['summary']['overall']['weeks_found']) }}</div>
                         <div class="stat-label">Weeks Found</div>
+                    </div>
+                </div>
+                <div class="col-md-2">
+                    <div class="stat-card">
+                        <div class="stat-value">{{ $results['summary']['overall']['unique_domains'] ?? 0 }}</div>
+                        <div class="stat-label">Unique Domains</div>
                     </div>
                 </div>
             </div>
@@ -168,7 +174,7 @@
                         <tr>
                             <td>{{ $name }}</td>
                             <td>{{ $data['total_rows'] }}</td>
-                            <td>{{ $data['working_urls'] + $data['cannot_verify_urls'] }}</td>
+                            <td>{{ $data['working_urls'] }}</td>
                             <td>{{ $data['cannot_verify_urls'] }}</td>
                             <td>{{ $data['valid_urls'] }}</td>
                             <td>{{ $data['broken_urls'] }}</td>

@@ -40,6 +40,7 @@ class SummaryAggregationService
                 'low_content_posts' => 0,
                 'valid_posts' => 0,
                 'weeks_found' => [],
+                'unique_domains' => 0,
                 'date_range' => [
                     'start' => null,
                     'end' => null
@@ -90,6 +91,9 @@ class SummaryAggregationService
             $coverageData = $this->extractCoverageData($processedData['all_rows']);
             $summary['overall']['weeks_found'] = array_keys($coverageData['weeks']);
             $summary['overall']['date_range'] = $coverageData['date_range'];
+            
+            // Calculate unique domains from all URLs
+            $summary['overall']['unique_domains'] = $this->calculateUniqueDomains($processedData['all_rows']);
         }
 
         return $summary;
@@ -220,6 +224,35 @@ class SummaryAggregationService
         }
 
         return $result;
+    }
+
+    /**
+     * Calculate unique domains from all URLs
+     */
+    private function calculateUniqueDomains(array $rows): int
+    {
+        $domains = [];
+        
+        foreach ($rows as $row) {
+            if (isset($row['included_in_scope']) && !$row['included_in_scope']) {
+                continue;
+            }
+            
+            // Get URLs from the row
+            $urls = $row['urls'] ?? [];
+            foreach ($urls as $url) {
+                $originalUrl = $url['original_url'] ?? '';
+                if (!empty($originalUrl)) {
+                    // Extract domain from URL
+                    $parsed = @parse_url($originalUrl);
+                    if (isset($parsed['host']) && !empty($parsed['host'])) {
+                        $domains[$parsed['host']] = true;
+                    }
+                }
+            }
+        }
+        
+        return count($domains);
     }
 
     /**

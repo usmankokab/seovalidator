@@ -98,6 +98,27 @@ class VerificationController extends Controller
             $this->urlValidator->setWorkbookHash($workbookHash);
             Log::info("Workbook hash: $workbookHash - will use persistent caching");
 
+            // Check if we have cached summary stats
+            $cachedSummary = $this->urlValidator->getCachedSummary($workbookHash);
+            if ($cachedSummary !== null) {
+                Log::info("Using cached summary stats - skipping URL validation");
+                
+                // Restore results from cached summary
+                $results = [
+                    'excel' => $cachedSummary['excel_file'] ?? 'cached_excel.xlsx',
+                    'word' => $cachedSummary['word_file'] ?? 'cached_word.docx',
+                    'pdf' => $cachedSummary['pdf_file'] ?? 'cached_pdf.pdf',
+                    'summary' => $cachedSummary,
+                    'coverage' => $cachedSummary['coverage'] ?? [],
+                    'exceptions' => $cachedSummary['exceptions'] ?? []
+                ];
+
+                return view('verification.result', [
+                    'results' => $results,
+                    'elapsed' => 0
+                ]);
+            }
+
             // 2. Load workbook
             $spreadsheet = $this->uploadService->load($workbookPath);
             if (!$spreadsheet) {
@@ -327,6 +348,18 @@ class VerificationController extends Controller
                 'exceptions' => $exceptions
             ];
 
+            // Save summary cache for future re-runs
+            $cacheData = [
+                'excel_file' => basename($excelFile),
+                'word_file' => basename($wordFile),
+                'pdf_file' => basename($pdfFile),
+                'summary' => $summary,
+                'coverage' => $coverage,
+                'exceptions' => $exceptions,
+                'cached_at' => date('Y-m-d H:i:s')
+            ];
+            $this->urlValidator->saveSummaryCache($workbookHash, $cacheData);
+
             session(['verification_results' => $results]);
 
             $elapsed = round(microtime(true) - $startTime, 2);
@@ -374,6 +407,17 @@ class VerificationController extends Controller
      */
     public function clearCache(Request $request)
     {
+        // Get the workbook hash if provided
+        $workbookHash = $request->input('hash');
+        
+        if ($workbookHash) {
+            // Clear summary cache for specific workbook
+            $summaryCachePath = storage_path('app/exports/summary_cache_' . $workbookHash . '.json');
+            if (file_exists($summaryCachePath)) {
+                unlink($summaryCachePath);
+            }
+        }
+        
         $this->urlValidator->clearPersistentCache();
         return back()->with('success', 'Cache cleared successfully');
     }

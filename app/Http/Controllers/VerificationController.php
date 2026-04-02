@@ -239,27 +239,11 @@ class VerificationController extends Controller
                     }
                 }
 
-                // Run sequential validation with HTML analysis for JavaScript SPA detection
+                // Run sequential validation with domain-aware parallel execution
+                // Group URLs by domain to avoid rate limiting, process in batches
                 // Caching is preserved across all URLs for consistent results
                 if (!empty($validationItems)) {
-                    foreach ($validationItems as $i => $item) {
-                        // Use validate() which includes HTML analysis and caching
-                        // Do NOT clear cache between requests - this ensures consistent results
-                        $res = $this->urlValidator->validate(
-                            $item['url'],
-                            $item['ourUrl'],
-                            $item['keyword']
-                        );
-                        
-                        $rIdx = $rowIndexes[$i];
-                        $uIdx = $urlIndexes[$i];
-                        $filteredRows[$rIdx]['urls'][$uIdx]['status'] = $res['status'];
-                        $filteredRows[$rIdx]['urls'][$uIdx]['status_code'] = $res['status_code'];
-                        $filteredRows[$rIdx]['urls'][$uIdx]['final_url'] = $res['final_url'];
-                        $filteredRows[$rIdx]['urls'][$uIdx]['error'] = $res['error'];
-                        $filteredRows[$rIdx]['urls'][$uIdx]['cannot_verify'] = $res['cannot_verify'] ?? false;
-                        $filteredRows[$rIdx]['urls'][$uIdx]['is_blank'] = $res['is_blank'] ?? false;
-                    }
+                    $this->validateWithDomainBatching($validationItems, $rowIndexes, $urlIndexes, $filteredRows);
                     
                     // Save persistent cache after all validations
                     $this->urlValidator->savePersistentCache();
@@ -392,5 +376,105 @@ class VerificationController extends Controller
     {
         $this->urlValidator->clearPersistentCache();
         return back()->with('success', 'Cache cleared successfully');
+    }
+
+    /**
+     * Validate URLs with domain-aware parallel batching
+     * Groups URLs by domain and processes in batches to avoid rate limiting
+     * Each batch of 10 URLs contains unique domains only
+     */
+    private function validateWithDomainBatching(array $validationItems, array $rowIndexes, array $urlIndexes, array &$filteredRows): void
+    {
+        $batchSize = 10; // Process 10 URLs at a time
+        $batches = [];
+        $currentBatch = [];
+        $usedDomains = [];
+        
+        // First, separate items into those with cache and those without
+        $cachedItems = [];
+        $uncachedItems = [];
+        
+        foreach ($validationItems as $i => $item) {
+            $url = $item['url'] ?? '';
+            $domain = $this->extractDomain($url);
+            
+            // Check if URL is already in persistent cache
+            $normalizedUrl = strtolower(trim($url));
+            // We'll check cache during validation
+            
+            if (!empty($domain)) {
+                // Check if we can add to current batch (domain not used in current batch)
+                if (!isset($usedDomains[$domain])) {
+                    $currentBatch[] = ['index' => $i, 'item' => $item, 'domain' => $domain];
+                    $usedDomains[$domain] = true;
+                    
+                    if (count($currentBatch) >= $batchSize) {
+                        $batches[] = $currentBatch;
+                        $currentBatch = [];
+                        $usedDomains = [];
+                    }
+                } else {
+                    // Domain already in current batch, save current batch and start new one
+                    if (!empty($currentBatch)) {
+                        $batches[] = $currentBatch;
+                        $currentBatch = [];
+                        $usedDomains = [];
+                    }
+                    // Add to new batch
+                    $currentBatch[] = ['index' => $i, 'item' => $item, 'domain' => $domain];
+                    $usedDomains[$domain] = true;
+                }
+            }
+        }
+        
+        // Add remaining items
+        if (!empty($currentBatch)) {
+            $batches[] = $currentBatch;
+        }
+        
+        Log::info("Processing " . count($validationItems) . " URLs in " . count($batches) . " batches with domain-aware parallel execution");
+        
+        // Process each batch
+        foreach ($batches as $batchNum => $batch) {
+            Log::info("Processing batch " . ($batchNum + 1) . "/" . count($batches) . " with " . count($batch) . " URLs");
+            
+            // Use batchValidateWithAnalysis for parallel execution within batch
+            $batchItems = array_map(fn($b) => $b['item'], $batch);
+            $batchResults = $this->urlValidator->batchValidateWithAnalysis($batchItems, 10);
+            
+            // Map results back to filteredRows
+            foreach ($batch as $batchItem) {
+                $i = $batchItem['index'];
+                $res = $batchResults[$i] ?? [];
+                
+                $rIdx = $rowIndexes[$i];
+                $uIdx = $urlIndexes[$i];
+                
+                if (isset($filteredRows[$rIdx]['urls'][$uIdx])) {
+                    $filteredRows[$rIdx]['urls'][$uIdx]['status'] = $res['status'] ?? 'Unknown';
+                    $filteredRows[$rIdx]['urls'][$uIdx]['status_code'] = $res['status_code'] ?? 0;
+                    $filteredRows[$rIdx]['urls'][$uIdx]['final_url'] = $res['final_url'] ?? '';
+                    $filteredRows[$rIdx]['urls'][$uIdx]['error'] = $res['error'] ?? null;
+                    $filteredRows[$rIdx]['urls'][$uIdx]['cannot_verify'] = $res['cannot_verify'] ?? false;
+                    $filteredRows[$rIdx]['urls'][$uIdx]['is_blank'] = $res['is_blank'] ?? false;
+                }
+            }
+            
+            // Small delay between batches to be polite
+            usleep(500000); // 0.5 second delay
+        }
+    }
+
+    /**
+     * Extract domain from URL
+     */
+    private function extractDomain(string $url): string
+    {
+        try {
+            $parsed = parse_url($url);
+            return $parsed['host'] ?? '';
+        } catch (\Exception $e) {
+            return '';
+        }
     }
 }

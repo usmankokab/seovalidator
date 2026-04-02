@@ -174,6 +174,7 @@ class VerificationController extends Controller
 
             // 3. Scan worksheets
             $worksheets = $this->scannerService->scan($spreadsheet);
+            Log::info("Found worksheets: " . implode(", ", array_column($worksheets, 'name')));
 
             // 4. Process each worksheet
             $processedData = [
@@ -222,13 +223,14 @@ class VerificationController extends Controller
                     continue;
                 }
 
-                // Default to only High Quality Submission worksheet
-                $worksheetFilter = $request->input('worksheet', 'High Quality Submission');
-                if (!empty($worksheetFilter) && $worksheetInfo['name'] !== $worksheetFilter) {
+                // Filter by worksheet name (case-insensitive) - required for complete mode
+                $worksheetFilter = $request->input('worksheet');
+                if (!empty($worksheetFilter) && strtolower($worksheetInfo['name']) !== strtolower($worksheetFilter)) {
                     // Skip other worksheets when filter is set
-                    Log::info("Skipping '" . $worksheetInfo['name'] . "' - not matching filter '$worksheetFilter'");
+                    Log::info("Skipping '" . $worksheetInfo['name'] . "' - not matching filter '$worksheetFilter' (case-insensitive)");
                     continue;
                 }
+                Log::info("Processing worksheet: '" . $worksheetInfo['name'] . "' (matches filter: '$worksheetFilter')");
                 
                 // Default to ONLY Submission page column if no filter specified
                 $urlColumnFilter = $request->input('url_column', 'submission page');
@@ -343,6 +345,12 @@ class VerificationController extends Controller
                     $processedData['all_rows'],
                     $filteredRows
                 );
+            }
+
+            // Check if any worksheets were processed
+            if ($reportMode === 'complete' && empty($processedData['by_worksheet'])) {
+                $requestedWorksheet = $request->input('worksheet');
+                return back()->with('error', "Worksheet '{$requestedWorksheet}' not found in the workbook. Please check the worksheet name and try again.");
             }
 
             // Check if any rows are included in scope (for filtered modes)

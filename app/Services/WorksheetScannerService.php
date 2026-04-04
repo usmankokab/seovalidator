@@ -60,21 +60,32 @@ class WorksheetScannerService
         $highestCol = $sheet->getHighestDataColumn();
         $colIndex = $this->columnLetterToIndex($highestCol);
 
-        // Auto-detect header row: find first row with any non-empty cell
+        // Auto-detect header row: find first row with actual text content (not just spaces)
         $detectedHeaderRow = 1;
+        Log::info("Auto-detecting header row in worksheet, checking up to row " . min(10, $highestRow));
         for ($row = 1; $row <= min(10, $highestRow); $row++) {
             $hasContent = false;
+            $rowValues = [];
+            $nonEmptyCount = 0;
             for ($col = 1; $col <= $colIndex; $col++) {
                 $cellValue = $sheet->getCell($this->indexToCell($col) . $row)->getValue();
-                if (!empty($cellValue)) {
+                $trimmedValue = $cellValue ? trim($cellValue) : '';
+                $rowValues[] = $trimmedValue ?: 'EMPTY';
+                if (!empty($trimmedValue)) {
                     $hasContent = true;
-                    break;
+                    $nonEmptyCount++;
                 }
             }
-            if ($hasContent) {
+            Log::info("Row $row values: " . implode(", ", $rowValues) . " ($nonEmptyCount non-empty cells)");
+            if ($hasContent && $nonEmptyCount >= 2) { // Require at least 2 non-empty cells to be a header row
                 $detectedHeaderRow = $row;
+                Log::info("Found header row at: $row");
                 break;
             }
+        }
+
+        if ($detectedHeaderRow === 1 && $highestRow > 1) {
+            Log::info("No suitable header row found in first 10 rows, defaulting to row 1. Worksheet has $highestRow total rows.");
         }
         
         $headerRow = $detectedHeaderRow;

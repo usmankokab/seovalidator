@@ -25,43 +25,66 @@ class ExcelExportService
     /**
      * Generate Excel report with all tabs
      */
-    public function export(array $summary, array $exceptions, array $coverage): string
+    public function export(array $summary, array $exceptions, array $coverage, string $fileName = 'Verification_Report.xlsx'): string
     {
         $spreadsheet = new Spreadsheet();
         $spreadsheet->getActiveSheet()->setTitle('Temp');
         $sheetIndex = 1;
 
-        // Sheet 1: Executive Summary
+        // Sheet 1: Dashboard
+        $this->addDashboard($spreadsheet, $summary, $exceptions, $sheetIndex++);
+
+        // Sheet 2: Executive Summary
         $this->addExecutiveSummary($spreadsheet, $summary, $sheetIndex++);
 
-        // Sheet 2: Worksheet Summary
+        // Sheet 3: Worksheet Summary
         $this->addWorksheetSummary($spreadsheet, $summary, $sheetIndex++);
 
-        // Sheet 3: Period Coverage
+        // Sheet 4: URL Health Analysis
+        $this->addUrlHealthAnalysis($spreadsheet, $summary, $sheetIndex++);
+
+        // Sheet 5: Content Quality
+        $this->addContentQualityAnalysis($spreadsheet, $exceptions, $sheetIndex++);
+
+        // Sheet 6: Period Coverage
         $this->addPeriodCoverage($spreadsheet, $coverage, $sheetIndex++);
 
-        // Sheet 4: URL Checks
+        // Sheet 7: Recommendations
+        $this->addRecommendations($spreadsheet, $summary, $exceptions, $sheetIndex++);
+
+        // Sheet 8: Timeout URLs
+        $this->addTimeoutUrls($spreadsheet, $exceptions, $sheetIndex++);
+
+        // Sheet 9: URL Checks
         $this->addUrlChecks($spreadsheet, $exceptions, $sheetIndex++);
 
-        // Sheet 5: Broken URLs
+        // Sheet 10: Broken URLs
         $this->addBrokenUrls($spreadsheet, $exceptions, $sheetIndex++);
 
-        // Sheet 6: Cannot Verify URLs
+        // Sheet 11: Cannot Verify URLs
         $this->addCannotVerifyUrls($spreadsheet, $exceptions, $sheetIndex++);
+        $this->addTimeoutUrls($spreadsheet, $exceptions, $sheetIndex++);
 
-        // Sheet 7: Blank Posts
+        // Sheet 8: Blank Posts
         $this->addBlankPosts($spreadsheet, $exceptions, $sheetIndex++);
 
-        // Sheet 8: Low Content Posts
+        // Sheet 9: Low Content Posts
         $this->addLowContentPosts($spreadsheet, $exceptions, $sheetIndex++);
-        
-        // Sheet 8: Post Analysis
-        $this->addPostAnalysis($spreadsheet, $exceptions, $sheetIndex++);
-        
-        // NEW - Sheet 9: URL Validation Status with result column
+
+        // Only add detailed Post Analysis for Complete mode to avoid memory issues
+        $isFilteredMode = (count($summary['worksheets'] ?? []) < 5) ||
+                         isset($summary['filter']['week']) ||
+                         isset($summary['filter']['start_date']);
+
+        if (!$isFilteredMode) {
+            // Sheet 10: Post Analysis (only for complete mode with many worksheets)
+            $this->addPostAnalysis($spreadsheet, $exceptions, $sheetIndex++);
+        }
+
+        // Sheet 11/10: URL Validation Status with result column
         $this->addUrlValidationStatus($spreadsheet, $exceptions, $sheetIndex++);
 
-        $fileName = $this->exportPath . '/Verification_Report.xlsx';
+        $fileName = $this->exportPath . '/' . $fileName;
         $writer = new Xlsx($spreadsheet);
         $writer->save($fileName);
 
@@ -217,9 +240,26 @@ class ExcelExportService
     {
         $sheet = $spreadsheet->createSheet($sheetIndex);
         $sheet->setTitle('Cannot Verify URLs');
-        
+
         $data = [['Worksheet', 'Row', 'URL', 'Error']];
         foreach ($exceptions['cannot_verify_urls'] ?? [] as $url) {
+            $data[] = [
+                $url['source_worksheet'] ?? '',
+                $url['original_row_number'] ?? '',
+                $url['original_url'] ?? '',
+                $url['error'] ?? ''
+            ];
+        }
+        $sheet->fromArray($data, null, 'A1');
+    }
+
+    private function addTimeoutUrls(Spreadsheet $spreadsheet, array $exceptions, int $sheetIndex): void
+    {
+        $sheet = $spreadsheet->createSheet($sheetIndex);
+        $sheet->setTitle('Timeout URLs');
+
+        $data = [['Worksheet', 'Row', 'URL', 'Error']];
+        foreach ($exceptions['timeout_urls'] ?? [] as $url) {
             $data[] = [
                 $url['source_worksheet'] ?? '',
                 $url['original_row_number'] ?? '',
@@ -279,5 +319,222 @@ class ExcelExportService
             ];
         }
         $sheet->fromArray($data, null, 'A1');
+    }
+
+    /**
+     * Add Dashboard sheet with key metrics and charts
+     */
+    private function addDashboard(Spreadsheet $spreadsheet, array $summary, array $exceptions, int $sheetIndex): void
+    {
+        $sheet = $spreadsheet->createSheet($sheetIndex);
+        $sheet->setTitle('Dashboard');
+
+        $overall = $summary['overall'];
+
+        // Title
+        $sheet->setCellValue('A1', 'SEO Workbook Verification Dashboard');
+        $sheet->getStyle('A1')->getFont()->setSize(16)->setBold(true);
+        $sheet->mergeCells('A1:E1');
+
+        // Key Metrics
+        $sheet->setCellValue('A3', 'Key Metrics');
+        $sheet->getStyle('A3')->getFont()->setBold(true);
+
+        $metrics = [
+            ['URL Health Score', ($overall['total_urls_checked'] > 0 ? round(($overall['working_urls'] / $overall['total_urls_checked']) * 100, 1) : 0) . '%'],
+            ['Total URLs Checked', $overall['total_urls_checked']],
+            ['Working URLs', $overall['working_urls']],
+            ['Broken URLs', $overall['broken_urls']],
+            ['Cannot Verify URLs', $overall['cannot_verify_urls']],
+            ['Content Quality Issues', $overall['blank_posts'] + $overall['low_content_posts']],
+            ['Unique Domains', $overall['unique_domains']],
+            ['Weeks Covered', count($overall['weeks_found'])]
+        ];
+
+        $row = 4;
+        foreach ($metrics as $metric) {
+            $sheet->setCellValue('A' . $row, $metric[0]);
+            $sheet->setCellValue('B' . $row, $metric[1]);
+            $row++;
+        }
+
+        // Conditional formatting for status
+        $healthScore = $overall['total_urls_checked'] > 0 ? ($overall['working_urls'] / $overall['total_urls_checked']) * 100 : 0;
+        if ($healthScore >= 80) {
+            $sheet->getStyle('B4')->getFont()->getColor()->setRGB('27AE60');
+        } elseif ($healthScore >= 60) {
+            $sheet->getStyle('B4')->getFont()->getColor()->setRGB('F39C12');
+        } else {
+            $sheet->getStyle('B4')->getFont()->getColor()->setRGB('E74C3C');
+        }
+
+        // Auto-size columns
+        foreach (range('A', 'B') as $col) {
+            $sheet->getColumnDimension($col)->setAutoSize(true);
+        }
+    }
+
+    /**
+     * Add URL Health Analysis sheet
+     */
+    private function addUrlHealthAnalysis(Spreadsheet $spreadsheet, array $summary, int $sheetIndex): void
+    {
+        $sheet = $spreadsheet->createSheet($sheetIndex);
+        $sheet->setTitle('URL Health Analysis');
+
+        $overall = $summary['overall'];
+
+        // Title
+        $sheet->setCellValue('A1', 'URL Health Analysis');
+        $sheet->getStyle('A1')->getFont()->setSize(14)->setBold(true);
+
+        // Headers
+        $sheet->setCellValue('A3', 'Status');
+        $sheet->setCellValue('B3', 'Count');
+        $sheet->setCellValue('C3', 'Description');
+        $sheet->setCellValue('D3', 'Priority');
+        $sheet->getStyle('A3:D3')->getFont()->setBold(true);
+
+        // Data
+        $urlStats = [
+            ['Working URLs', $overall['working_urls'], 'Accessible and responding properly', 'Low'],
+            ['Broken URLs', $overall['broken_urls'], 'Not accessible (404, 5xx errors, DNS failures)', 'High'],
+            ['Cannot Verify', $overall['cannot_verify_urls'], 'Protected by anti-bot systems or authentication', 'Medium'],
+            ['Redirected', $overall['redirected_urls'], 'HTTP redirects (may be normal)', 'Low'],
+            ['Timeout', $overall['timeout_urls'], 'Request timed out (>10 seconds)', 'Medium']
+        ];
+
+        $row = 4;
+        foreach ($urlStats as $stat) {
+            $sheet->setCellValue('A' . $row, $stat[0]);
+            $sheet->setCellValue('B' . $row, $stat[1]);
+            $sheet->setCellValue('C' . $row, $stat[2]);
+            $sheet->setCellValue('D' . $row, $stat[3]);
+            $row++;
+        }
+
+        // Auto-size columns
+        foreach (range('A', 'D') as $col) {
+            $sheet->getColumnDimension($col)->setAutoSize(true);
+        }
+    }
+
+    /**
+     * Add Content Quality Analysis sheet
+     */
+    private function addContentQualityAnalysis(Spreadsheet $spreadsheet, array $exceptions, int $sheetIndex): void
+    {
+        $sheet = $spreadsheet->createSheet($sheetIndex);
+        $sheet->setTitle('Content Quality');
+
+        // Title
+        $sheet->setCellValue('A1', 'Content Quality Analysis');
+        $sheet->getStyle('A1')->getFont()->setSize(14)->setBold(true);
+
+        // Headers
+        $sheet->setCellValue('A3', 'Issue Type');
+        $sheet->setCellValue('B3', 'Count');
+        $sheet->setCellValue('C3', 'Description');
+        $sheet->setCellValue('D3', 'SEO Impact');
+        $sheet->getStyle('A3:D3')->getFont()->setBold(true);
+
+        // Data
+        $contentStats = [
+            ['Blank Posts', count($exceptions['blank_posts']), 'Posts with no content (0 words)', 'High'],
+            ['Low Content Posts', count($exceptions['low_content_posts']), 'Posts with insufficient content (<50 words)', 'Medium']
+        ];
+
+        $row = 4;
+        foreach ($contentStats as $stat) {
+            $sheet->setCellValue('A' . $row, $stat[0]);
+            $sheet->setCellValue('B' . $row, $stat[1]);
+            $sheet->setCellValue('C' . $row, $stat[2]);
+            $sheet->setCellValue('D' . $row, $stat[3]);
+            $row++;
+        }
+
+        // Auto-size columns
+        foreach (range('A', 'D') as $col) {
+            $sheet->getColumnDimension($col)->setAutoSize(true);
+        }
+    }
+
+    /**
+     * Add Recommendations sheet
+     */
+    private function addRecommendations(Spreadsheet $spreadsheet, array $summary, array $exceptions, int $sheetIndex): void
+    {
+        $sheet = $spreadsheet->createSheet($sheetIndex);
+        $sheet->setTitle('Recommendations');
+
+        $overall = $summary['overall'];
+
+        // Title
+        $sheet->setCellValue('A1', 'Recommendations & Action Items');
+        $sheet->getStyle('A1')->getFont()->setSize(14)->setBold(true);
+
+        $recommendations = [];
+        $row = 3;
+
+        if ($overall['broken_urls'] > 0) {
+            $sheet->setCellValue('A' . $row, 'HIGH PRIORITY: Fix Broken URLs');
+            $sheet->getStyle('A' . $row)->getFont()->setBold(true)->getColor()->setRGB('E74C3C');
+            $row++;
+
+            $sheet->setCellValue('A' . $row, "Address {$overall['broken_urls']} broken URLs that are hurting your SEO and user experience.");
+            $row++;
+
+            $actions = ['Check for typos in URLs', 'Update moved or deleted content', 'Set up proper 301 redirects'];
+            foreach ($actions as $action) {
+                $sheet->setCellValue('B' . $row, '• ' . $action);
+                $row++;
+            }
+            $row++; // Empty row
+        }
+
+        if ($overall['blank_posts'] > 0) {
+            $sheet->setCellValue('A' . $row, 'HIGH PRIORITY: Add Content to Blank Posts');
+            $sheet->getStyle('A' . $row)->getFont()->setBold(true)->getColor()->setRGB('E74C3C');
+            $row++;
+
+            $sheet->setCellValue('A' . $row, "{$overall['blank_posts']} posts have no content and may affect SEO performance.");
+            $row++;
+
+            $actions = ['Write meaningful content for each blank post', 'Ensure each post has at least 300 words', 'Add relevant images and formatting'];
+            foreach ($actions as $action) {
+                $sheet->setCellValue('B' . $row, '• ' . $action);
+                $row++;
+            }
+            $row++;
+        }
+
+        if ($overall['cannot_verify_urls'] > 0) {
+            $sheet->setCellValue('A' . $row, 'MEDIUM PRIORITY: Review Protected URLs');
+            $sheet->getStyle('A' . $row)->getFont()->setBold(true)->getColor()->setRGB('F39C12');
+            $row++;
+
+            $sheet->setCellValue('A' . $row, "{$overall['cannot_verify_urls']} URLs are protected by anti-bot systems or require authentication.");
+            $row++;
+
+            $actions = ['Verify if these URLs require authentication', 'Check if these are internal/admin URLs', 'Consider using different user agents'];
+            foreach ($actions as $action) {
+                $sheet->setCellValue('B' . $row, '• ' . $action);
+                $row++;
+            }
+            $row++;
+        }
+
+        if (empty($recommendations) && empty(array_filter($overall, fn($v) => is_numeric($v) && $v > 0))) {
+            $sheet->setCellValue('A' . $row, '✅ EXCELLENT! No major issues found.');
+            $sheet->getStyle('A' . $row)->getFont()->getColor()->setRGB('27AE60');
+            $row++;
+
+            $sheet->setCellValue('A' . $row, 'Your content appears to be in good health. Continue monitoring for optimal SEO performance.');
+        }
+
+        // Auto-size columns
+        foreach (range('A', 'B') as $col) {
+            $sheet->getColumnDimension($col)->setAutoSize(true);
+        }
     }
 }

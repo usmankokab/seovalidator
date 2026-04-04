@@ -86,14 +86,14 @@
                 </div>
                 <div class="col-md-2">
                     <div class="stat-card">
-                        <div class="stat-value text-success">{{ $results['summary']['overall']['working_urls'] }}</div>
-                        <div class="stat-label">Working</div>
+                        <div class="stat-value">{{ $results['summary']['overall']['unique_domains'] ?? 0 }}</div>
+                        <div class="stat-label">Unique Domains</div>
                     </div>
                 </div>
                 <div class="col-md-2">
                     <div class="stat-card">
-                        <div class="stat-value">{{ $results['summary']['overall']['cannot_verify_urls'] }}</div>
-                        <div class="stat-label">Cannot Verify</div>
+                        <div class="stat-value text-success">{{ $results['summary']['overall']['working_urls'] }}</div>
+                        <div class="stat-label">Working</div>
                     </div>
                 </div>
                 <div class="col-md-2">
@@ -110,6 +110,12 @@
                 </div>
             </div>
             <div class="row mt-3">
+                <div class="col-md-2">
+                    <div class="stat-card">
+                        <div class="stat-value">{{ $results['summary']['overall']['cannot_verify_urls'] }}</div>
+                        <div class="stat-label">Cannot Verify</div>
+                    </div>
+                </div>
                 <div class="col-md-2">
                     <div class="stat-card">
                         <div class="stat-value">{{ $results['summary']['overall']['redirected_urls'] }}</div>
@@ -140,12 +146,6 @@
                         <div class="stat-label">Weeks Found</div>
                     </div>
                 </div>
-                <div class="col-md-2">
-                    <div class="stat-card">
-                        <div class="stat-value">{{ $results['summary']['overall']['unique_domains'] ?? 0 }}</div>
-                        <div class="stat-label">Unique Domains</div>
-                    </div>
-                </div>
             </div>
         </div>
 
@@ -158,6 +158,7 @@
                         <tr>
                             <th>Worksheet</th>
                             <th>Rows</th>
+                            <th>Checked</th>
                             <th>Working</th>
                             <th>Cannot Verify</th>
                             <th>Valid</th>
@@ -166,6 +167,7 @@
                             <th>Low</th>
                             <th>Redirected</th>
                             <th>Timeout</th>
+                            <th>Unique</th>
                             <th>Weeks</th>
                         </tr>
                     </thead>
@@ -174,6 +176,7 @@
                         <tr>
                             <td>{{ $name }}</td>
                             <td>{{ $data['total_rows'] }}</td>
+                            <td>{{ $data['working_urls'] + $data['broken_urls'] + $data['cannot_verify_urls'] + $data['redirected_urls'] + $data['timeout_urls'] }}</td>
                             <td>{{ $data['working_urls'] }}</td>
                             <td>{{ $data['cannot_verify_urls'] }}</td>
                             <td>{{ $data['valid_urls'] }}</td>
@@ -182,6 +185,7 @@
                             <td>{{ $data['low_content_posts'] }}</td>
                             <td>{{ $data['redirected_urls'] }}</td>
                             <td>{{ $data['timeout_urls'] }}</td>
+                            <td>{{ $data['unique_domains'] ?? 0 }}</td>
                             <td>{{ count($data['weeks']) }}</td>
                         </tr>
                         @endforeach

@@ -73,11 +73,11 @@
 
                     <!-- Report Mode -->
                     <div class="mb-4">
-                        <label class="form-label"><strong>Report Mode</strong></label>
+                        <label class="form-label"><strong>Report Mode</strong> (Select any one of the modes to proceed)</label>
                         
                         <div class="mode-option" onclick="selectMode(this, 'complete')">
                             <input type="radio" name="mode" value="complete" checked>
-                            <strong>Complete Workbook</strong>
+                            <strong>Complete Worksheet</strong>
                             <p class="text-muted small mb-0">Analyze all worksheets and rows</p>
                         </div>
                         
@@ -92,6 +92,15 @@
                             <strong>Date Range</strong>
                             <p class="text-muted small mb-0">Filter by start and end date</p>
                         </div>
+
+                        {{-- Hidden: Complete Workbook mode --}}
+                        @if(false)
+                        <div class="mode-option" onclick="selectMode(this, 'complete_worksheet')">
+                            <input type="radio" name="mode" value="complete_worksheet">
+                            <strong>Complete Workbook</strong>
+                            <p class="text-muted small mb-0">(without Blank Post, Low Content)</p>
+                        </div>
+                        @endif
                         @error('mode')
                             <div class="text-danger small mt-1">{{ $message }}</div>
                         @enderror
@@ -196,18 +205,33 @@
 
         // Validate dates, week number, and worksheet name
         document.querySelector('form').addEventListener('submit', function(e) {
-            const mode = document.querySelector('input[name="mode"]:checked').value;
+            const mode = document.querySelector('input[name="mode"]:checked');
+
+            const modeValue = mode.value;
             const startDate = document.querySelector('input[name="start_date"]').value;
             const endDate = document.querySelector('input[name="end_date"]').value;
             const weekInput = document.querySelector('input[name="week"]');
             const worksheetInput = document.querySelector('input[name="worksheet"]');
 
-            if (mode === 'date_range' && startDate && endDate && startDate > endDate) {
-                e.preventDefault();
-                alert('End date must be after start date');
+            if (modeValue === 'date_range' && startDate && endDate) {
+                if (startDate > endDate) {
+                    e.preventDefault();
+                    alert('End date must be after start date');
+                } else {
+                    // Check if date range exceeds 30 days
+                    const start = new Date(startDate);
+                    const end = new Date(endDate);
+                    const diffTime = Math.abs(end - start);
+                    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+                    if (diffDays > 30) {
+                        e.preventDefault();
+                        alert(`Date range cannot exceed 30 days. Your selected range is ${diffDays} days. Please reduce the date range.`);
+                    }
+                }
             }
 
-            if (mode === 'single_week' && weekInput) {
+            if (modeValue === 'single_week' && weekInput) {
                 const weekValue = weekInput.value.trim();
                 // Allow empty, but if filled must be a positive number
                 if (weekValue && (!/^\d+$/.test(weekValue) || parseInt(weekValue) < 1)) {
@@ -216,7 +240,7 @@
                 }
             }
 
-            if (mode === 'complete' && worksheetInput) {
+            if (modeValue === 'complete' && worksheetInput) {
                 const worksheetValue = worksheetInput.value.trim();
                 if (!worksheetValue) {
                     e.preventDefault();

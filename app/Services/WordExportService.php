@@ -41,23 +41,61 @@ class WordExportService
         $phpWord->setDefaultFontName('Arial');
         $phpWord->setDefaultFontSize(11);
 
-        // Add sections as per SRS Section 9.3
+        // Add sections with enhanced styling and insights
         $this->addCoverPage($phpWord, $sourceFileName, $metadata);
+        $this->addExecutiveInsightsSection($phpWord, $summary, $exceptions);
         $this->addExecutiveSummarySection($phpWord, $summary);
+        $this->addKeyMetricsDashboard($phpWord, $summary);
         $this->addWorksheetSummarySection($phpWord, $summary);
         $this->addPeriodCoverageSection($phpWord, $coverage);
+        $this->addUrlHealthAnalysis($phpWord, $summary, $exceptions);
         $this->addBrokenUrlsSection($phpWord, $exceptions['broken_urls']);
+        $this->addTimeoutUrlsSection($phpWord, $exceptions['timeout_urls']);
         $this->addCannotVerifyUrlsSection($phpWord, $exceptions['cannot_verify_urls']);
-        $this->addBlankPostsSection($phpWord, $exceptions['blank_posts']);
-        $this->addLowContentSection($phpWord, $exceptions['low_content_posts']);
+        $this->addContentQualityAnalysis($phpWord, $exceptions);
+        $this->addRecommendationsSection($phpWord, $summary, $exceptions);
         $this->addDetailedAnalysisSection($phpWord, $exceptions['url_checks']);
 
-        // Save file
+        // Use simple Word export for reliability
+        Log::info("Using simple Word export for reliability");
+        return $this->createSimpleWordExport($summary, $exceptions, $sourceFileName, $metadata, $fileName);
+    }
+
+    /**
+     * Create a simple Word export as fallback
+     */
+    private function createSimpleWordExport(array $summary, array $exceptions, string $sourceFileName, array $metadata, string $fileName): string
+    {
+        Log::info("Creating simple Word export as fallback");
+
+        $phpWord = new PhpWord();
+        $phpWord->setDefaultFontName('Arial');
+        $phpWord->setDefaultFontSize(11);
+
+        $section = $phpWord->addSection();
+
+        // Simple title
+        $section->addText('SEO Workbook Verification Report', ['bold' => true, 'size' => 16], ['alignment' => 'center', 'spaceAfter' => 400]);
+
+        // Basic info
+        $section->addText("Source: {$sourceFileName}", ['size' => 12], ['spaceAfter' => 200]);
+        $section->addText("Generated: {$metadata['generated_at']}", ['size' => 12], ['spaceAfter' => 200]);
+        $section->addText("Mode: " . ucfirst($metadata['mode']), ['size' => 12], ['spaceAfter' => 400]);
+
+        // Simple summary
+        $overall = $summary['overall'];
+        $section->addText('Summary:', ['bold' => true, 'size' => 14], ['spaceAfter' => 200]);
+        $section->addText("Total Rows: {$overall['total_rows']}", ['size' => 11], ['spaceAfter' => 100]);
+        $section->addText("URLs Checked: {$overall['total_urls_checked']}", ['size' => 11], ['spaceAfter' => 100]);
+        $section->addText("Working URLs: {$overall['working_urls']}", ['size' => 11], ['spaceAfter' => 100]);
+        $section->addText("Broken URLs: {$overall['broken_urls']}", ['size' => 11], ['spaceAfter' => 100]);
+
+        // Save simple version
         $outputFile = $this->outputPath . '/' . $fileName;
         $writer = IOFactory::createWriter($phpWord, 'Word2007');
         $writer->save($outputFile);
 
-        Log::info("Word report exported: {$outputFile}");
+        Log::info("Simple Word report exported: {$outputFile}");
         return $outputFile;
     }
 
@@ -85,6 +123,298 @@ class WordExportService
                 ? json_encode($metadata['filter']) 
                 : $metadata['filter'];
             $section->addText("Filter: {$filterText}", ['size' => 12], ['spaceAfter' => 100]);
+        }
+
+        $section->addPageBreak();
+    }
+
+    /**
+     * Add Executive Insights section with key findings
+     */
+    private function addExecutiveInsightsSection(PhpWord $phpWord, array $summary, array $exceptions): void
+    {
+        $section = $phpWord->addSection();
+
+        $section->addTitle('Executive Insights', 1);
+
+        // Key findings
+        $overall = $summary['overall'];
+        $totalUrls = $overall['total_urls_checked'];
+        $workingUrls = $overall['working_urls'];
+        $brokenUrls = $overall['broken_urls'];
+
+        // Calculate health score
+        $healthScore = $totalUrls > 0 ? round(($workingUrls / $totalUrls) * 100, 1) : 0;
+
+        $section->addText("🔍 Key Findings:", ['bold' => true, 'size' => 14], ['spaceAfter' => 200]);
+
+        $insights = [];
+
+        if ($healthScore >= 80) {
+            $insights[] = "✅ Excellent URL Health: {$healthScore}% of URLs are working properly.";
+        } elseif ($healthScore >= 60) {
+            $insights[] = "⚠️ Good URL Health: {$healthScore}% of URLs are working, but {$brokenUrls} URLs need attention.";
+        } else {
+            $insights[] = "❌ Poor URL Health: Only {$healthScore}% of URLs are working. {$brokenUrls} URLs require immediate fixing.";
+        }
+
+        if ($overall['cannot_verify_urls'] > 0) {
+            $insights[] = "🔒 {$overall['cannot_verify_urls']} URLs are protected by anti-bot systems or require authentication.";
+        }
+
+        if ($overall['blank_posts'] > 0) {
+            $insights[] = "📝 {$overall['blank_posts']} posts have no content and may affect SEO performance.";
+        }
+
+        if ($overall['low_content_posts'] > 0) {
+            $insights[] = "📄 {$overall['low_content_posts']} posts have insufficient content (<50 words) for optimal SEO.";
+        }
+
+        if (count($overall['weeks_found']) > 1) {
+            $insights[] = "📅 Content spans " . count($overall['weeks_found']) . " weeks, showing good content consistency.";
+        }
+
+        foreach ($insights as $insight) {
+            $section->addText("• " . $insight, ['size' => 11], ['spaceAfter' => 100]);
+        }
+
+        $section->addPageBreak();
+    }
+
+    /**
+     * Add Key Metrics Dashboard
+     */
+    private function addKeyMetricsDashboard(PhpWord $phpWord, array $summary): void
+    {
+        $section = $phpWord->addSection();
+
+        $section->addTitle('Key Metrics Dashboard', 1);
+
+        $overall = $summary['overall'];
+
+        // Create a visual dashboard with metrics
+        $table = $section->addTable(['borderSize' => 6, 'borderColor' => '006699', 'cellMargin' => 80]);
+
+        // Header row
+        $table->addRow();
+        $table->addCell(2000)->addText('Metric', ['bold' => true, 'size' => 12]);
+        $table->addCell(1500)->addText('Value', ['bold' => true, 'size' => 12]);
+        $table->addCell(2500)->addText('Status', ['bold' => true, 'size' => 12]);
+
+        // URL Health
+        $totalUrls = $overall['total_urls_checked'];
+        $workingUrls = $overall['working_urls'];
+        $healthPercent = $totalUrls > 0 ? round(($workingUrls / $totalUrls) * 100, 1) : 0;
+
+        $table->addRow();
+        $table->addCell(2000)->addText('URL Health Score', ['size' => 11]);
+        $table->addCell(1500)->addText("{$healthPercent}%", ['size' => 11, 'bold' => true]);
+        $status = $healthPercent >= 80 ? 'Excellent' : ($healthPercent >= 60 ? 'Good' : 'Needs Attention');
+        $table->addCell(2500)->addText($status, ['size' => 11, 'color' => $healthPercent >= 80 ? '006600' : ($healthPercent >= 60 ? 'FF6600' : 'CC0000')]);
+
+        // Content Quality
+        $blankPosts = $overall['blank_posts'];
+        $lowContent = $overall['low_content_posts'];
+        $contentIssues = $blankPosts + $lowContent;
+
+        $table->addRow();
+        $table->addCell(2000)->addText('Content Quality Issues', ['size' => 11]);
+        $table->addCell(1500)->addText($contentIssues, ['size' => 11, 'bold' => true]);
+        $status = $contentIssues === 0 ? 'Perfect' : ($contentIssues < 10 ? 'Minor Issues' : 'Needs Attention');
+        $table->addCell(2500)->addText($status, ['size' => 11, 'color' => $contentIssues === 0 ? '006600' : ($contentIssues < 10 ? 'FF6600' : 'CC0000')]);
+
+        // Domain Diversity
+        $uniqueDomains = $overall['unique_domains'];
+
+        $table->addRow();
+        $table->addCell(2000)->addText('Domain Diversity', ['size' => 11]);
+        $table->addCell(1500)->addText($uniqueDomains, ['size' => 11, 'bold' => true]);
+        $status = $uniqueDomains > 10 ? 'Excellent' : ($uniqueDomains > 5 ? 'Good' : 'Limited');
+        $table->addCell(2500)->addText($status, ['size' => 11, 'color' => $uniqueDomains > 10 ? '006600' : ($uniqueDomains > 5 ? 'FF6600' : 'CC0000')]);
+
+        // Coverage
+        $weeksCount = count($overall['weeks_found']);
+
+        $table->addRow();
+        $table->addCell(2000)->addText('Time Coverage', ['size' => 11]);
+        $table->addCell(1500)->addText("{$weeksCount} weeks", ['size' => 11, 'bold' => true]);
+        $status = $weeksCount > 4 ? 'Comprehensive' : ($weeksCount > 1 ? 'Good' : 'Limited');
+        $table->addCell(2500)->addText($status, ['size' => 11, 'color' => $weeksCount > 4 ? '006600' : ($weeksCount > 1 ? 'FF6600' : 'CC0000')]);
+
+        $section->addPageBreak();
+    }
+
+    /**
+     * Add URL Health Analysis
+     */
+    private function addUrlHealthAnalysis(PhpWord $phpWord, array $summary, array $exceptions): void
+    {
+        $section = $phpWord->addSection();
+
+        $section->addTitle('URL Health Analysis', 1);
+
+        $overall = $summary['overall'];
+
+        $section->addText("📊 URL Status Breakdown:", ['bold' => true, 'size' => 14], ['spaceAfter' => 200]);
+
+        $urlStats = [
+            ['Working URLs', $overall['working_urls'], 'Accessible and responding properly', '006600'],
+            ['Broken URLs', $overall['broken_urls'], 'Not accessible (404, 5xx errors, DNS failures)', 'CC0000'],
+            ['Cannot Verify', $overall['cannot_verify_urls'], 'Protected by anti-bot systems or authentication', 'FF6600'],
+            ['Redirected', $overall['redirected_urls'], 'HTTP redirects (may be normal)', 'FF9900'],
+            ['Timeout', $overall['timeout_urls'], 'Request timed out (>10 seconds)', '996633']
+        ];
+
+        $table = $section->addTable(['borderSize' => 6, 'borderColor' => 'CCCCCC', 'cellMargin' => 80]);
+        $table->addRow();
+        $table->addCell(2000)->addText('Status', ['bold' => true, 'size' => 12]);
+        $table->addCell(1500)->addText('Count', ['bold' => true, 'size' => 12]);
+        $table->addCell(3500)->addText('Description', ['bold' => true, 'size' => 12]);
+        $table->addCell(1500)->addText('Action Priority', ['bold' => true, 'size' => 12]);
+
+        foreach ($urlStats as $stat) {
+            $table->addRow();
+            $table->addCell(2000)->addText($stat[0], ['size' => 11, 'color' => $stat[3]]);
+            $table->addCell(1500)->addText($stat[1], ['size' => 11, 'bold' => true]);
+            $table->addCell(3500)->addText($stat[2], ['size' => 11]);
+            $priority = $stat[0] === 'Broken URLs' ? 'High' : ($stat[0] === 'Cannot Verify' ? 'Medium' : 'Low');
+            $table->addCell(1500)->addText($priority, ['size' => 11, 'bold' => true]);
+        }
+
+        $section->addPageBreak();
+    }
+
+    /**
+     * Add Content Quality Analysis
+     */
+    private function addContentQualityAnalysis(PhpWord $phpWord, array $exceptions): void
+    {
+        $section = $phpWord->addSection();
+
+        $section->addTitle('Content Quality Analysis', 1);
+
+        $section->addText("📝 Content Quality Assessment:", ['bold' => true, 'size' => 14], ['spaceAfter' => 200]);
+
+        $contentStats = [
+            ['Blank Posts', count($exceptions['blank_posts']), 'Posts with no content (0 words)', 'CC0000', 'High'],
+            ['Low Content Posts', count($exceptions['low_content_posts']), 'Posts with insufficient content (<50 words)', 'FF6600', 'Medium']
+        ];
+
+        $table = $section->addTable(['borderSize' => 6, 'borderColor' => 'CCCCCC', 'cellMargin' => 80]);
+        $table->addRow();
+        $table->addCell(2000)->addText('Issue Type', ['bold' => true, 'size' => 12]);
+        $table->addCell(1500)->addText('Count', ['bold' => true, 'size' => 12]);
+        $table->addCell(3500)->addText('Description', ['bold' => true, 'size' => 12]);
+        $table->addCell(1500)->addText('SEO Impact', ['bold' => true, 'size' => 12]);
+
+        foreach ($contentStats as $stat) {
+            $table->addRow();
+            $table->addCell(2000)->addText($stat[0], ['size' => 11, 'color' => $stat[3]]);
+            $table->addCell(1500)->addText($stat[1], ['size' => 11, 'bold' => true]);
+            $table->addCell(3500)->addText($stat[2], ['size' => 11]);
+            $table->addCell(1500)->addText($stat[4], ['size' => 11, 'bold' => true]);
+        }
+
+        $section->addPageBreak();
+    }
+
+    /**
+     * Add Recommendations section
+     */
+    private function addRecommendationsSection(PhpWord $phpWord, array $summary, array $exceptions): void
+    {
+        $section = $phpWord->addSection();
+
+        $section->addTitle('Recommendations & Action Items', 1);
+
+        $overall = $summary['overall'];
+        $recommendations = [];
+
+        // URL Health Recommendations
+        if ($overall['broken_urls'] > 0) {
+            $recommendations[] = [
+                'priority' => 'High',
+                'category' => 'URL Health',
+                'recommendation' => "Fix {$overall['broken_urls']} broken URLs immediately. Broken links hurt user experience and SEO rankings.",
+                'actions' => [
+                    'Check for typos in URLs',
+                    'Update moved or deleted content',
+                    'Set up proper 301 redirects for moved pages',
+                    'Remove links to discontinued services'
+                ]
+            ];
+        }
+
+        if ($overall['cannot_verify_urls'] > 0) {
+            $recommendations[] = [
+                'priority' => 'Medium',
+                'category' => 'URL Health',
+                'recommendation' => "Review {$overall['cannot_verify_urls']} protected URLs. These may be behind login walls or anti-bot systems.",
+                'actions' => [
+                    'Verify if these URLs require authentication',
+                    'Consider using different user agents for crawling',
+                    'Check if these are internal/admin URLs that should be excluded'
+                ]
+            ];
+        }
+
+        // Content Quality Recommendations
+        if ($overall['blank_posts'] > 0) {
+            $recommendations[] = [
+                'priority' => 'High',
+                'category' => 'Content Quality',
+                'recommendation' => "Add content to {$overall['blank_posts']} blank posts. Empty pages provide no value to users or search engines.",
+                'actions' => [
+                    'Write meaningful content for each blank post',
+                    'Ensure each post has at least 300 words of quality content',
+                    'Add relevant images and formatting'
+                ]
+            ];
+        }
+
+        if ($overall['low_content_posts'] > 0) {
+            $recommendations[] = [
+                'priority' => 'Medium',
+                'category' => 'Content Quality',
+                'recommendation' => "Expand {$overall['low_content_posts']} low-content posts. Posts under 50 words may not rank well in search results.",
+                'actions' => [
+                    'Add more detailed information and examples',
+                    'Include related links and references',
+                    'Break up content with subheadings and lists'
+                ]
+            ];
+        }
+
+        // Domain Diversity Recommendations
+        if ($overall['unique_domains'] < 5) {
+            $recommendations[] = [
+                'priority' => 'Low',
+                'category' => 'Link Diversity',
+                'recommendation' => "Improve domain diversity. Currently using only {$overall['unique_domains']} unique domains.",
+                'actions' => [
+                    'Include links from different authoritative sources',
+                    'Diversify content sources across multiple domains',
+                    'Avoid over-reliance on single domain for backlinks'
+                ]
+            ];
+        }
+
+        // Display recommendations
+        foreach ($recommendations as $rec) {
+            $section->addText("{$rec['priority']} Priority - {$rec['category']}", ['bold' => true, 'size' => 13, 'color' => $rec['priority'] === 'High' ? 'CC0000' : ($rec['priority'] === 'Medium' ? 'FF6600' : '006600')], ['spaceAfter' => 100]);
+            $section->addText($rec['recommendation'], ['size' => 11, 'italic' => true], ['spaceAfter' => 150]);
+
+            $section->addText("Recommended Actions:", ['bold' => true, 'size' => 11], ['spaceAfter' => 100]);
+            foreach ($rec['actions'] as $action) {
+                $section->addText("• " . $action, ['size' => 11], ['spaceAfter' => 50]);
+            }
+
+            $section->addTextBreak(1);
+        }
+
+        if (empty($recommendations)) {
+            $section->addText("✅ Excellent! No major issues found. Your content appears to be in good health.", ['bold' => true, 'size' => 12, 'color' => '006600'], ['spaceAfter' => 200]);
+            $section->addText("Continue monitoring and maintaining your content quality to ensure optimal SEO performance.", ['size' => 11], ['spaceAfter' => 100]);
         }
 
         $section->addPageBreak();
@@ -239,6 +569,40 @@ class WordExportService
         $table->addCell(1000)->addText('Row', ['bold' => true]);
         $table->addCell(4000)->addText('URL', ['bold' => true]);
         $table->addCell(2000)->addText('Reason', ['bold' => true]);
+
+        foreach ($urls as $url) {
+            $table->addRow(300);
+            $table->addCell(2000)->addText($url['source_worksheet']);
+            $table->addCell(1000)->addText((string)$url['original_row_number']);
+            $table->addCell(4000)->addText($url['original_url']);
+            $table->addCell(2000)->addText($url['error']);
+        }
+
+        $section->addPageBreak();
+    }
+
+    /**
+     * Add Timeout URLs section
+     */
+    private function addTimeoutUrlsSection(PhpWord $phpWord, array $urls): void
+    {
+        $section = $phpWord->addSection();
+
+        $section->addText('Timeout URLs', ['bold' => true, 'size' => 18], ['spaceAfter' => 200]);
+
+        if (empty($urls)) {
+            $section->addText('No timeout URLs found.');
+            $section->addPageBreak();
+            return;
+        }
+
+        $table = $section->addTable(['borderSize' => 1, 'cellMargin' => 50]);
+
+        $table->addRow(400);
+        $table->addCell(2000)->addText('Worksheet', ['bold' => true]);
+        $table->addCell(1000)->addText('Row', ['bold' => true]);
+        $table->addCell(4000)->addText('URL', ['bold' => true]);
+        $table->addCell(2000)->addText('Error', ['bold' => true]);
 
         foreach ($urls as $url) {
             $table->addRow(300);

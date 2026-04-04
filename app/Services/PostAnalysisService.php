@@ -18,47 +18,70 @@ class PostAnalysisService
 
     /**
      * Analyze post content for a row
-     * ONLY check URL body content - do NOT check workbook content
+     * Check URL body content for blank and low content detection
      * Blank = HTTP 200-299 AND body has 0 content
+     * Low Content = HTTP 200-299 AND body has < 50 words
      */
-    public function analyze(array &$row): void
+    public function analyze(array &$row, string $reportMode = 'complete'): void
     {
         $flagReason = null;
-        
-        // Only check URLs for blank detection - ignore workbook content
+        $wordCount = 0;
+        $text = '';
+        $excerpt = '';
+
+        // Only check URLs for content analysis - ignore workbook content
         if (!empty($row['urls'])) {
             $firstUrl = $row['urls'][0] ?? [];
             $urlStatus = $firstUrl['status'] ?? '';
-            
-            // Only check for blank if URL returns 200-299
+
+            // Only analyze content if URL returns 200-299
             if ($urlStatus === 'Working') {
-                // Check if URL body has content
-                if (!empty($firstUrl['is_blank']) && $firstUrl['is_blank'] === true) {
+                // Check if URL body has content for blank detection
+                // Skip blank post detection for complete_worksheet mode
+                if ($reportMode !== 'complete_worksheet' && !empty($firstUrl['is_blank']) && $firstUrl['is_blank'] === true) {
                     $flagReason = 'Blank Post';
+                } else {
+                    // For non-blank pages, check word count for low content
+                    // Use extracted text from URL validation if available
+                    $extractedContent = $firstUrl['extracted_text'] ?? $this->extractContentFromUrl($firstUrl);
+                    $text = $this->cleanText($extractedContent);
+                    $wordCount = $this->countWords($text);
+                    $excerpt = $this->createExcerpt($text, 200);
+
+                    // Check for low content (< 50 words)
+                    // Skip low content detection for complete_worksheet mode
+                    if ($reportMode !== 'complete_worksheet' && $wordCount > 0 && $wordCount < self::MIN_WORD_COUNT) {
+                        $flagReason = 'Low Content';
+                    }
                 }
             }
         }
-        
-        // Update row with analysis results - no content analysis, only URL check
+
+        // Update row with analysis results
+        // For complete_worksheet mode, don't flag blank/low content even if detected
+        $isBlank = ($reportMode !== 'complete_worksheet' && $flagReason === 'Blank Post');
+        $isLowContent = ($reportMode !== 'complete_worksheet' && $flagReason === 'Low Content');
+        $finalFlagReason = ($reportMode === 'complete_worksheet') ? null : $flagReason;
+
         $row['post_analysis'] = [
-            'source' => 'url_check',
-            'text' => '',
-            'word_count' => 0,
-            'excerpt' => '',
-            'flag_reason' => $flagReason,
-            'is_blank' => ($flagReason === 'Blank Post'),
-            'is_low_content' => false,
-            'exceeds_threshold' => ($flagReason === null)
+            'source' => 'url_content_analysis',
+            'text' => $text,
+            'word_count' => $wordCount,
+            'excerpt' => $excerpt,
+            'flag_reason' => $finalFlagReason,
+            'is_blank' => $isBlank,
+            'is_low_content' => $isLowContent,
+            'exceeds_threshold' => ($finalFlagReason === null)
         ];
     }
 
     /**
      * Analyze multiple rows
      */
-    public function analyzeMultiple(array &$rows): void
+    public function analyzeMultiple(array &$rows, string $reportMode = 'complete'): void
     {
         foreach ($rows as &$row) {
-            $this->analyze($row);
+            $this->analyze($row, $reportMode);
         }
     }
 
@@ -193,5 +216,17 @@ class PostAnalysisService
         }
 
         return false;
+    }
+
+    /**
+     * Extract readable content from URL for word count analysis
+     * This is a simplified version - in production, this would use the ContentExtractionService
+     */
+    private function extractContentFromUrl(array $urlData): string
+    {
+        // For now, return empty string - content extraction would need to be implemented
+        // In a full implementation, this would re-fetch the URL or use cached content
+        // from the URL validation process
+        return '';
     }
 }

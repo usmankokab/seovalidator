@@ -62,7 +62,7 @@ class SummaryAggregationService
                     $row['urls'] = [];
                 }
             }
-            $worksheetSummary = $this->generateWorksheetSummary($rows, $worksheetName);
+            $worksheetSummary = $this->generateWorksheetSummary($rows, $worksheetName, $reportMode);
             $summary['worksheets'][$worksheetName] = $worksheetSummary;
             
             // Add to overall
@@ -102,7 +102,7 @@ class SummaryAggregationService
     /**
      * Generate per-worksheet summary
      */
-    private function generateWorksheetSummary(array $rows, string $worksheetName): array
+    private function generateWorksheetSummary(array $rows, string $worksheetName, string $reportMode): array
     {
         $summary = [
             'worksheet' => $worksheetName,
@@ -118,6 +118,7 @@ class SummaryAggregationService
             'blank_posts' => 0,
             'low_content_posts' => 0,
             'valid_posts' => 0,
+            'unique_domains' => 0,
             'weeks' => [],
             'coverage' => [
                 'min_date' => null,
@@ -141,10 +142,22 @@ class SummaryAggregationService
 
             // Count URLs
             foreach ($row['urls'] as $url) {
-                $summary['total_urls_checked']++;
                 $status = $url['status'] ?? '';
-                $key = $urlStatuses[$status] ?? 'broken_urls';
-                $summary[$key]++;
+
+                // For complete_worksheet mode, count all URLs regardless of validation status
+                // For other modes, only count validated URLs
+                if ($reportMode !== 'complete_worksheet' && empty($status)) {
+                    // Skip URLs without status in normal modes
+                    continue;
+                }
+
+                $summary['total_urls_checked']++;
+
+                // Only set status counts if URL was actually validated
+                if (!empty($status)) {
+                    $key = $urlStatuses[$status] ?? 'broken_urls';
+                    $summary[$key]++;
+                }
             }
 
             // Count posts - valid_posts for post analysis (posts with content)
@@ -187,6 +200,9 @@ class SummaryAggregationService
         $summary['valid_urls'] = max(0, $checked - $invalidCount);
 
         $summary['weeks'] = array_keys($summary['weeks']);
+
+        // Calculate unique domains for this worksheet
+        $summary['unique_domains'] = $this->calculateUniqueDomains($rows);
 
         return $summary;
     }
@@ -262,6 +278,7 @@ class SummaryAggregationService
     {
         $exceptions = [
             'broken_urls' => [],
+            'timeout_urls' => [],
             'cannot_verify_urls' => [],
             'blank_posts' => [],
             'low_content_posts' => [],
@@ -293,8 +310,11 @@ class SummaryAggregationService
 
             // Collect URLs
             foreach ($row['urls'] as $urlIndex => $url) {
-                if (in_array($url['status'], [UrlValidationService::STATUS_BROKEN, UrlValidationService::STATUS_TIMEOUT])) {
+                if ($url['status'] === UrlValidationService::STATUS_BROKEN) {
                     $exceptions['broken_urls'][] = $this->formatUrlException($row, $url);
+                }
+                if ($url['status'] === UrlValidationService::STATUS_TIMEOUT) {
+                    $exceptions['timeout_urls'][] = $this->formatUrlException($row, $url);
                 }
                 if ($url['status'] === UrlValidationService::STATUS_CANNOT_VERIFY) {
                     $exceptions['cannot_verify_urls'][] = $this->formatUrlException($row, $url);

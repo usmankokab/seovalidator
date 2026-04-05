@@ -44,6 +44,10 @@ class SummaryAggregationService
                 'date_range' => [
                     'start' => null,
                     'end' => null
+                ],
+                'cannot_verify_breakdown' => [
+                    'forbidden' => 0,
+                    'other' => 0
                 ]
             ]
         ];
@@ -78,6 +82,8 @@ class SummaryAggregationService
             $summary['overall']['blank_posts'] += $worksheetSummary['blank_posts'];
             $summary['overall']['low_content_posts'] += $worksheetSummary['low_content_posts'];
             $summary['overall']['valid_posts'] += $worksheetSummary['valid_posts'];
+            $summary['overall']['cannot_verify_breakdown']['forbidden'] += $worksheetSummary['cannot_verify_breakdown']['forbidden'];
+            $summary['overall']['cannot_verify_breakdown']['other'] += $worksheetSummary['cannot_verify_breakdown']['other'];
         }
 
         // Get week/date coverage - ensure all_rows exist first
@@ -123,6 +129,10 @@ class SummaryAggregationService
             'coverage' => [
                 'min_date' => null,
                 'max_date' => null
+            ],
+            'cannot_verify_breakdown' => [
+                'forbidden' => 0,
+                'other' => 0
             ]
         ];
 
@@ -157,6 +167,15 @@ class SummaryAggregationService
                 if (!empty($status)) {
                     $key = $urlStatuses[$status] ?? 'broken_urls';
                     $summary[$key]++;
+
+                    // Breakdown for Cannot Verify
+                    if ($status === UrlValidationService::STATUS_CANNOT_VERIFY) {
+                        if (strpos($url['message'] ?? '', '403') !== false) {
+                            $summary['cannot_verify_breakdown']['forbidden']++;
+                        } else {
+                            $summary['cannot_verify_breakdown']['other']++;
+                        }
+                    }
                 }
             }
 

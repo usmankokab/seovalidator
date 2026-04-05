@@ -110,12 +110,15 @@
                 </div>
             </div>
             <div class="row mt-3">
-                <div class="col-md-2">
-                    <div class="stat-card">
-                        <div class="stat-value">{{ $results['summary']['overall']['cannot_verify_urls'] }}</div>
-                        <div class="stat-label">Cannot Verify</div>
-                    </div>
-                </div>
+                 <div class="col-md-2">
+                     <div class="stat-card">
+                         <div class="stat-value">{{ $results['summary']['overall']['cannot_verify_urls'] }}</div>
+                         <div class="stat-label">Cannot Verify</div>
+                         @if(($results['summary']['overall']['cannot_verify_breakdown']['forbidden'] ?? 0) > 0)
+                             <div class="small text-muted">Including {{ $results['summary']['overall']['cannot_verify_breakdown']['forbidden'] }} Forbidden</div>
+                         @endif
+                     </div>
+                 </div>
                 <div class="col-md-2">
                     <div class="stat-card">
                         <div class="stat-value">{{ $results['summary']['overall']['redirected_urls'] }}</div>

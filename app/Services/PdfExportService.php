@@ -48,7 +48,7 @@ class PdfExportService
                 h2 { font-size: 18px; margin-top: 25px; margin-bottom: 12px; color: #34495e; border-bottom: 2px solid #bdc3c7; padding-bottom: 5px; }
                 h3 { font-size: 14px; margin-top: 18px; margin-bottom: 8px; color: #7f8c8d; }
                 .insights { background: #ecf0f1; padding: 15px; border-left: 4px solid #3498db; margin: 15px 0; }
-                .metric-card { background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 5px; padding: 10px; margin: 5px; display: inline-block; min-width: 120px; text-align: center; }
+                .metric-card { background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 5px; padding: 10px; margin: 5px; display: inline-block; min-width: 120px; text-align: left; }
                 .metric-value { font-size: 18px; font-weight: bold; color: #2c3e50; }
                 .metric-label { font-size: 10px; color: #7f8c8d; text-transform: uppercase; }
                 .status-excellent { color: #27ae60; font-weight: bold; }
@@ -107,15 +107,18 @@ class PdfExportService
         $html = '<html><body>';
         $html .= '<h2>Executive Summary</h2>';
         $html .= '<div class="summary-box">';
-        $html .= "<p><strong>Total Rows Reviewed:</strong> {$summary['overall']['total_rows']}</p>";
-        $html .= "<p><strong>Total URLs Checked:</strong> {$summary['overall']['total_urls_checked']}</p>";
-        $html .= "<p><strong>Working URLs:</strong> {$summary['overall']['working_urls']}</p>";
-        $html .= "<p><strong>Broken URLs:</strong> {$summary['overall']['broken_urls']}</p>";
-        $html .= "<p><strong>Cannot Verify URLs:</strong> {$summary['overall']['cannot_verify_urls']}</p>";
-        $html .= "<p><strong>Redirected URLs:</strong> {$summary['overall']['redirected_urls']}</p>";
-        $html .= "<p><strong>Invalid URLs:</strong> {$summary['overall']['invalid_urls']}</p>";
-        $html .= "<p><strong>Blank Posts:</strong> {$summary['overall']['blank_posts']}</p>";
-        $html .= "<p><strong>Posts Under 50 Words:</strong> {$summary['overall']['low_content_posts']}</p>";
+        $html .= "<p><strong>Rows:</strong> {$summary['overall']['total_rows']}</p>";
+        $html .= "<p><strong>Checked:</strong> {$summary['overall']['total_urls_checked']}</p>";
+        $html .= "<p><strong>Working:</strong> {$summary['overall']['working_urls']}</p>";
+        $html .= "<p><strong>Cannot Verify:</strong> {$summary['overall']['cannot_verify_urls']}</p>";
+        $html .= "<p><strong>Valid:</strong> {$summary['overall']['valid_urls']}</p>";
+        $html .= "<p><strong>Broken:</strong> {$summary['overall']['broken_urls']}</p>";
+        $html .= "<p><strong>Blank:</strong> {$summary['overall']['blank_posts']}</p>";
+        $html .= "<p><strong>Low:</strong> {$summary['overall']['low_content_posts']}</p>";
+        $html .= "<p><strong>Redirected:</strong> {$summary['overall']['redirected_urls']}</p>";
+        $html .= "<p><strong>Timeout:</strong> {$summary['overall']['timeout_urls']}</p>";
+        $html .= "<p><strong>Unique:</strong> {$summary['overall']['unique_domains']}</p>";
+        $html .= "<p><strong>Weeks:</strong> " . count($summary['overall']['weeks_found']) . "</p>";
         $html .= '</div>';
         $html .= '</body></html>';
         
@@ -126,7 +129,7 @@ class PdfExportService
         $html = '<html><body>';
         $html .= '<h2>Worksheet Summary</h2>';
         $html .= '<table>';
-        $html .= '<tr><th>Worksheet</th><th>Rows</th><th>URLs</th><th>Working</th><th>Broken</th><th>Blank</th><th>Low</th></tr>';
+        $html .= '<tr><th>Worksheet</th><th>Rows</th><th>Checked</th><th>Working</th><th>Cannot Verify</th><th>Valid</th><th>Broken</th><th>Blank</th><th>Low</th><th>Redirected</th><th>Timeout</th><th>Unique</th><th>Weeks</th></tr>';
         
         foreach ($summary['worksheets'] as $name => $data) {
             $html .= '<tr>';
@@ -134,9 +137,15 @@ class PdfExportService
             $html .= '<td>' . $data['total_rows'] . '</td>';
             $html .= '<td>' . $data['total_urls_checked'] . '</td>';
             $html .= '<td>' . $data['working_urls'] . '</td>';
+            $html .= '<td>' . $data['cannot_verify_urls'] . '</td>';
+            $html .= '<td>' . $data['valid_urls'] . '</td>';
             $html .= '<td>' . $data['broken_urls'] . '</td>';
             $html .= '<td>' . $data['blank_posts'] . '</td>';
             $html .= '<td>' . $data['low_content_posts'] . '</td>';
+            $html .= '<td>' . $data['redirected_urls'] . '</td>';
+            $html .= '<td>' . $data['timeout_urls'] . '</td>';
+            $html .= '<td>' . ($data['unique_domains'] ?? 0) . '</td>';
+            $html .= '<td>' . count($data['weeks']) . '</td>';
             $html .= '</tr>';
         }
         
@@ -348,7 +357,7 @@ class PdfExportService
 
         $overall = $summary['overall'];
 
-        $html .= '<div style="text-align: center; margin: 20px 0;">';
+        $html .= '<div style="text-align: left; margin: 20px 0;">';
 
         // URL Health
         $totalUrls = $overall['total_urls_checked'];
@@ -400,7 +409,7 @@ class PdfExportService
         $urlStats = [
             ['Working URLs', $overall['working_urls'], 'Accessible and responding properly', 'Low'],
             ['Broken URLs', $overall['broken_urls'], 'Not accessible (404, 5xx errors, DNS failures)', 'High'],
-            ['Cannot Verify', $overall['cannot_verify_urls'], 'Protected by anti-bot systems or authentication', 'Medium'],
+            ['Cannot Verify', $overall['cannot_verify_urls'], 'HTTP 403 Forbidden (' . ($overall['cannot_verify_breakdown']['forbidden'] ?? 0) . ') or protected by anti-bot systems/authentication', 'Medium'],
             ['Redirected', $overall['redirected_urls'], 'HTTP redirects (may be normal)', 'Low'],
             ['Timeout', $overall['timeout_urls'], 'Request timed out (>10 seconds)', 'Medium']
         ];

@@ -47,18 +47,24 @@ class WordExportService
         $this->addExecutiveSummarySection($phpWord, $summary);
         $this->addKeyMetricsDashboard($phpWord, $summary);
         $this->addWorksheetSummarySection($phpWord, $summary);
-        $this->addPeriodCoverageSection($phpWord, $coverage);
-        $this->addUrlHealthAnalysis($phpWord, $summary, $exceptions);
-        $this->addBrokenUrlsSection($phpWord, $exceptions['broken_urls']);
-        $this->addTimeoutUrlsSection($phpWord, $exceptions['timeout_urls']);
-        $this->addCannotVerifyUrlsSection($phpWord, $exceptions['cannot_verify_urls']);
-        $this->addContentQualityAnalysis($phpWord, $exceptions);
-        $this->addRecommendationsSection($phpWord, $summary, $exceptions);
-        $this->addDetailedAnalysisSection($phpWord, $exceptions['url_checks']);
 
-        // Use simple Word export for reliability
-        Log::info("Using simple Word export for reliability");
-        return $this->createSimpleWordExport($summary, $exceptions, $sourceFileName, $metadata, $fileName);
+        // Temporarily removed exception sections for testing
+
+        // Save file with error handling
+        $outputFile = $this->outputPath . '/' . $fileName;
+
+        // Try complex export first
+        try {
+            $writer = IOFactory::createWriter($phpWord, 'Word2007');
+            $writer->save($outputFile);
+            Log::info("Complex Word report exported: {$outputFile}");
+            return $outputFile;
+        } catch (\Exception $e) {
+            Log::error("Complex Word export failed: " . $e->getMessage());
+            Log::info("Falling back to simple Word export due to: " . $e->getMessage());
+            // Fallback to simpler Word export
+            return $this->createSimpleWordExport($summary, $exceptions, $sourceFileName, $metadata, $fileName);
+        }
     }
 
     /**
@@ -135,13 +141,13 @@ class WordExportService
     {
         $section = $phpWord->addSection();
 
-        $section->addTitle('Executive Insights', 1);
+        $section->addText('Executive Insights', ['bold' => true, 'size' => 16], ['spaceAfter' => 200]);
 
         // Key findings
-        $overall = $summary['overall'];
-        $totalUrls = $overall['total_urls_checked'];
-        $workingUrls = $overall['working_urls'];
-        $brokenUrls = $overall['broken_urls'];
+        $overall = $summary['overall'] ?? [];
+        $totalUrls = $overall['total_urls_checked'] ?? 0;
+        $workingUrls = $overall['working_urls'] ?? 0;
+        $brokenUrls = $overall['broken_urls'] ?? 0;
 
         // Calculate health score
         $healthScore = $totalUrls > 0 ? round(($workingUrls / $totalUrls) * 100, 1) : 0;
@@ -170,7 +176,7 @@ class WordExportService
             $insights[] = "📄 {$overall['low_content_posts']} posts have insufficient content (<50 words) for optimal SEO.";
         }
 
-        if (count($overall['weeks_found']) > 1) {
+        if (isset($overall['weeks_found']) && count($overall['weeks_found']) > 1) {
             $insights[] = "📅 Content spans " . count($overall['weeks_found']) . " weeks, showing good content consistency.";
         }
 
@@ -188,9 +194,9 @@ class WordExportService
     {
         $section = $phpWord->addSection();
 
-        $section->addTitle('Key Metrics Dashboard', 1);
+        $section->addText('Key Metrics Dashboard', ['bold' => true, 'size' => 16], ['spaceAfter' => 200]);
 
-        $overall = $summary['overall'];
+        $overall = $summary['overall'] ?? [];
 
         // Create a visual dashboard with metrics
         $table = $section->addTable(['borderSize' => 6, 'borderColor' => '006699', 'cellMargin' => 80]);
@@ -202,8 +208,8 @@ class WordExportService
         $table->addCell(2500)->addText('Status', ['bold' => true, 'size' => 12]);
 
         // URL Health
-        $totalUrls = $overall['total_urls_checked'];
-        $workingUrls = $overall['working_urls'];
+        $totalUrls = $overall['total_urls_checked'] ?? 0;
+        $workingUrls = $overall['working_urls'] ?? 0;
         $healthPercent = $totalUrls > 0 ? round(($workingUrls / $totalUrls) * 100, 1) : 0;
 
         $table->addRow();
@@ -213,8 +219,8 @@ class WordExportService
         $table->addCell(2500)->addText($status, ['size' => 11, 'color' => $healthPercent >= 80 ? '006600' : ($healthPercent >= 60 ? 'FF6600' : 'CC0000')]);
 
         // Content Quality
-        $blankPosts = $overall['blank_posts'];
-        $lowContent = $overall['low_content_posts'];
+        $blankPosts = $overall['blank_posts'] ?? 0;
+        $lowContent = $overall['low_content_posts'] ?? 0;
         $contentIssues = $blankPosts + $lowContent;
 
         $table->addRow();
@@ -224,7 +230,7 @@ class WordExportService
         $table->addCell(2500)->addText($status, ['size' => 11, 'color' => $contentIssues === 0 ? '006600' : ($contentIssues < 10 ? 'FF6600' : 'CC0000')]);
 
         // Domain Diversity
-        $uniqueDomains = $overall['unique_domains'];
+        $uniqueDomains = $overall['unique_domains'] ?? 0;
 
         $table->addRow();
         $table->addCell(2000)->addText('Domain Diversity', ['size' => 11]);
@@ -233,7 +239,7 @@ class WordExportService
         $table->addCell(2500)->addText($status, ['size' => 11, 'color' => $uniqueDomains > 10 ? '006600' : ($uniqueDomains > 5 ? 'FF6600' : 'CC0000')]);
 
         // Coverage
-        $weeksCount = count($overall['weeks_found']);
+        $weeksCount = isset($overall['weeks_found']) ? count($overall['weeks_found']) : 0;
 
         $table->addRow();
         $table->addCell(2000)->addText('Time Coverage', ['size' => 11]);
@@ -251,18 +257,18 @@ class WordExportService
     {
         $section = $phpWord->addSection();
 
-        $section->addTitle('URL Health Analysis', 1);
+        $section->addText('URL Health Analysis', ['bold' => true, 'size' => 16], ['spaceAfter' => 200]);
 
-        $overall = $summary['overall'];
+        $overall = $summary['overall'] ?? [];
 
         $section->addText("📊 URL Status Breakdown:", ['bold' => true, 'size' => 14], ['spaceAfter' => 200]);
 
         $urlStats = [
-            ['Working URLs', $overall['working_urls'], 'Accessible and responding properly', '006600'],
-            ['Broken URLs', $overall['broken_urls'], 'Not accessible (404, 5xx errors, DNS failures)', 'CC0000'],
-            ['Cannot Verify', $overall['cannot_verify_urls'], 'Protected by anti-bot systems or authentication', 'FF6600'],
-            ['Redirected', $overall['redirected_urls'], 'HTTP redirects (may be normal)', 'FF9900'],
-            ['Timeout', $overall['timeout_urls'], 'Request timed out (>10 seconds)', '996633']
+            ['Working URLs', $overall['working_urls'] ?? 0, 'Accessible and responding properly', '006600'],
+            ['Broken URLs', $overall['broken_urls'] ?? 0, 'Not accessible (404, 5xx errors, DNS failures)', 'CC0000'],
+            ['Cannot Verify', $overall['cannot_verify_urls'] ?? 0, 'HTTP 403 Forbidden (' . ($overall['cannot_verify_breakdown']['forbidden'] ?? 0) . ') or protected by anti-bot systems/authentication', 'FF6600'],
+            ['Redirected', $overall['redirected_urls'] ?? 0, 'HTTP redirects (may be normal)', 'FF9900'],
+            ['Timeout', $overall['timeout_urls'] ?? 0, 'Request timed out (>10 seconds)', '996633']
         ];
 
         $table = $section->addTable(['borderSize' => 6, 'borderColor' => 'CCCCCC', 'cellMargin' => 80]);
@@ -291,7 +297,7 @@ class WordExportService
     {
         $section = $phpWord->addSection();
 
-        $section->addTitle('Content Quality Analysis', 1);
+        $section->addText('Content Quality Analysis', ['bold' => true, 'size' => 16], ['spaceAfter' => 200]);
 
         $section->addText("📝 Content Quality Assessment:", ['bold' => true, 'size' => 14], ['spaceAfter' => 200]);
 
@@ -325,13 +331,13 @@ class WordExportService
     {
         $section = $phpWord->addSection();
 
-        $section->addTitle('Recommendations & Action Items', 1);
+        $section->addText('Recommendations & Action Items', ['bold' => true, 'size' => 16], ['spaceAfter' => 200]);
 
-        $overall = $summary['overall'];
+        $overall = $summary['overall'] ?? [];
         $recommendations = [];
 
         // URL Health Recommendations
-        if ($overall['broken_urls'] > 0) {
+        if (($overall['broken_urls'] ?? 0) > 0) {
             $recommendations[] = [
                 'priority' => 'High',
                 'category' => 'URL Health',
@@ -345,21 +351,7 @@ class WordExportService
             ];
         }
 
-        if ($overall['cannot_verify_urls'] > 0) {
-            $recommendations[] = [
-                'priority' => 'Medium',
-                'category' => 'URL Health',
-                'recommendation' => "Review {$overall['cannot_verify_urls']} protected URLs. These may be behind login walls or anti-bot systems.",
-                'actions' => [
-                    'Verify if these URLs require authentication',
-                    'Consider using different user agents for crawling',
-                    'Check if these are internal/admin URLs that should be excluded'
-                ]
-            ];
-        }
-
-        // Content Quality Recommendations
-        if ($overall['blank_posts'] > 0) {
+        if (($overall['blank_posts'] ?? 0) > 0) {
             $recommendations[] = [
                 'priority' => 'High',
                 'category' => 'Content Quality',
@@ -372,7 +364,7 @@ class WordExportService
             ];
         }
 
-        if ($overall['low_content_posts'] > 0) {
+        if (($overall['low_content_posts'] ?? 0) > 0) {
             $recommendations[] = [
                 'priority' => 'Medium',
                 'category' => 'Content Quality',
@@ -429,17 +421,20 @@ class WordExportService
         
         $section->addText('Executive Summary', ['bold' => true, 'size' => 18], ['spaceAfter' => 200]);
 
-        // Key metrics
+        // Key metrics - all required categories
         $metrics = [
-            "Total Rows Reviewed: {$summary['overall']['total_rows']}",
-            "Total URLs Checked: {$summary['overall']['total_urls_checked']}",
-            "Working URLs: {$summary['overall']['working_urls']}",
-            "Broken URLs: {$summary['overall']['broken_urls']}",
-            "Cannot Verify URLs: {$summary['overall']['cannot_verify_urls']}",
-            "Redirected URLs: {$summary['overall']['redirected_urls']}",
-            "Invalid URLs: {$summary['overall']['invalid_urls']}",
-            "Blank Posts: {$summary['overall']['blank_posts']}",
-            "Posts Under 50 Words: {$summary['overall']['low_content_posts']}"
+            "Rows: {$summary['overall']['total_rows']}",
+            "Checked: {$summary['overall']['total_urls_checked']}",
+            "Working: {$summary['overall']['working_urls']}",
+            "Cannot Verify: {$summary['overall']['cannot_verify_urls']}",
+            "Valid: {$summary['overall']['valid_urls']}",
+            "Broken: {$summary['overall']['broken_urls']}",
+            "Blank: {$summary['overall']['blank_posts']}",
+            "Low: {$summary['overall']['low_content_posts']}",
+            "Redirected: {$summary['overall']['redirected_urls']}",
+            "Timeout: {$summary['overall']['timeout_urls']}",
+            "Unique: {$summary['overall']['unique_domains']}",
+            "Weeks: " . count($summary['overall']['weeks_found'])
         ];
 
         foreach ($metrics as $metric) {
@@ -460,26 +455,38 @@ class WordExportService
 
         $table = $section->addTable(['borderSize' => 1, 'cellMargin' => 50]);
         
-        // Header row
+        // Header row - all required columns
         $table->addRow(400);
-        $table->addCell(3000)->addText('Worksheet', ['bold' => true]);
-        $table->addCell(1500)->addText('Rows', ['bold' => true]);
-        $table->addCell(1500)->addText('URLs', ['bold' => true]);
-        $table->addCell(1500)->addText('Working', ['bold' => true]);
-        $table->addCell(1500)->addText('Broken', ['bold' => true]);
-        $table->addCell(1500)->addText('Blank', ['bold' => true]);
-        $table->addCell(1500)->addText('Low', ['bold' => true]);
+        $table->addCell(2500)->addText('Worksheet', ['bold' => true]);
+        $table->addCell(1200)->addText('Rows', ['bold' => true]);
+        $table->addCell(1200)->addText('Checked', ['bold' => true]);
+        $table->addCell(1200)->addText('Working', ['bold' => true]);
+        $table->addCell(1200)->addText('Cannot Verify', ['bold' => true]);
+        $table->addCell(1200)->addText('Valid', ['bold' => true]);
+        $table->addCell(1200)->addText('Broken', ['bold' => true]);
+        $table->addCell(1200)->addText('Blank', ['bold' => true]);
+        $table->addCell(1200)->addText('Low', ['bold' => true]);
+        $table->addCell(1200)->addText('Redirected', ['bold' => true]);
+        $table->addCell(1200)->addText('Timeout', ['bold' => true]);
+        $table->addCell(1200)->addText('Unique', ['bold' => true]);
+        $table->addCell(1200)->addText('Weeks', ['bold' => true]);
 
-        // Data rows
+        // Data rows - all required columns
         foreach ($summary['worksheets'] as $name => $data) {
             $table->addRow(300);
-            $table->addCell(3000)->addText($name);
-            $table->addCell(1500)->addText((string)$data['total_rows']);
-            $table->addCell(1500)->addText((string)$data['total_urls_checked']);
-            $table->addCell(1500)->addText((string)$data['working_urls']);
-            $table->addCell(1500)->addText((string)$data['broken_urls']);
-            $table->addCell(1500)->addText((string)$data['blank_posts']);
-            $table->addCell(1500)->addText((string)$data['low_content_posts']);
+            $table->addCell(2500)->addText($name);
+            $table->addCell(1200)->addText((string)$data['total_rows']);
+            $table->addCell(1200)->addText((string)$data['total_urls_checked']);
+            $table->addCell(1200)->addText((string)$data['working_urls']);
+            $table->addCell(1200)->addText((string)$data['cannot_verify_urls']);
+            $table->addCell(1200)->addText((string)$data['valid_urls']);
+            $table->addCell(1200)->addText((string)$data['broken_urls']);
+            $table->addCell(1200)->addText((string)$data['blank_posts']);
+            $table->addCell(1200)->addText((string)$data['low_content_posts']);
+            $table->addCell(1200)->addText((string)$data['redirected_urls']);
+            $table->addCell(1200)->addText((string)$data['timeout_urls']);
+            $table->addCell(1200)->addText((string)($data['unique_domains'] ?? 0));
+            $table->addCell(1200)->addText((string)count($data['weeks']));
         }
 
         $section->addPageBreak();

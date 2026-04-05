@@ -315,10 +315,9 @@ class UrlValidationService
 
                 // Client or server error - but don't retry on 4xx errors (client errors)
                 if ($statusCode >= 400 && $statusCode < 500) {
-                    // For 403, could be bot protection - try one more time after longer delay
-                    if ($statusCode === 403 && $attempt < $this->maxRetries) {
-                        $lastException = new \Exception('HTTP 403 - will retry');
-                        continue;
+                    // 403 Forbidden - treat as Cannot Verify (bot protection/access denied)
+                    if ($statusCode === 403) {
+                        return $this->createResult($url, self::STATUS_CANNOT_VERIFY, $statusCode, "HTTP 403 Forbidden - Access denied (bot protection or authentication required)", $effectiveUri);
                     }
                     // Don't retry other 4xx errors
                     return $this->createResult($url, self::STATUS_BROKEN, $statusCode, "HTTP {$statusCode}", $effectiveUri);
@@ -697,6 +696,7 @@ class UrlValidationService
         // Create a new client for parallel requests
         $parallelClient = new Client([
             'timeout' => 10,
+            'http_errors' => false,
             'allow_redirects' => [
                 'max' => 10,
                 'track_redirects' => true

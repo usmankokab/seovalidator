@@ -155,14 +155,18 @@ class ExcelExportService
         $sheet->fromArray([
             ['Metric', 'Value'],
             ['Total Worksheets', count($summary['worksheets'] ?? [])],
-            ['Total Rows', $overall['total_rows'] ?? 0],
-            ['Total URLs Checked', $overall['total_urls_checked'] ?? 0],
-            ['Working URLs', $overall['working_urls'] ?? 0],
-            ['Broken URLs', $overall['broken_urls'] ?? 0],
-            ['Cannot Verify URLs', $overall['cannot_verify_urls'] ?? 0],
-            ['Redirected URLs', $overall['redirected_urls'] ?? 0],
-            ['Blank Posts', $overall['blank_posts'] ?? 0],
-            ['Low Content Posts', $overall['low_content_posts'] ?? 0]
+            ['Rows', $overall['total_rows'] ?? 0],
+            ['Checked', $overall['total_urls_checked'] ?? 0],
+            ['Working', $overall['working_urls'] ?? 0],
+            ['Cannot Verify', $overall['cannot_verify_urls'] ?? 0],
+            ['Valid', $overall['valid_urls'] ?? 0],
+            ['Broken', $overall['broken_urls'] ?? 0],
+            ['Blank', $overall['blank_posts'] ?? 0],
+            ['Low', $overall['low_content_posts'] ?? 0],
+            ['Redirected', $overall['redirected_urls'] ?? 0],
+            ['Timeout', $overall['timeout_urls'] ?? 0],
+            ['Unique', $overall['unique_domains'] ?? 0],
+            ['Weeks', count($overall['weeks_found'] ?? [])]
         ], null, 'A1');
     }
 
@@ -171,14 +175,22 @@ class ExcelExportService
         $sheet = $spreadsheet->createSheet($sheetIndex);
         $sheet->setTitle('Worksheet Summary');
         
-        $data = [['Worksheet', 'Rows', 'URLs Checked', 'Working', 'Broken']];
+        $data = [['Worksheet', 'Rows', 'Checked', 'Working', 'Cannot Verify', 'Valid', 'Broken', 'Blank', 'Low', 'Redirected', 'Timeout', 'Unique', 'Weeks']];
         foreach ($summary['worksheets'] ?? [] as $wsName => $wsSummary) {
             $data[] = [
                 $wsName,
                 $wsSummary['total_rows'] ?? 0,
                 $wsSummary['total_urls_checked'] ?? 0,
                 $wsSummary['working_urls'] ?? 0,
-                $wsSummary['broken_urls'] ?? 0
+                $wsSummary['cannot_verify_urls'] ?? 0,
+                $wsSummary['valid_urls'] ?? 0,
+                $wsSummary['broken_urls'] ?? 0,
+                $wsSummary['blank_posts'] ?? 0,
+                $wsSummary['low_content_posts'] ?? 0,
+                $wsSummary['redirected_urls'] ?? 0,
+                $wsSummary['timeout_urls'] ?? 0,
+                $wsSummary['unique_domains'] ?? 0,
+                count($wsSummary['weeks'] ?? [])
             ];
         }
         $sheet->fromArray($data, null, 'A1');
@@ -399,7 +411,7 @@ class ExcelExportService
         $urlStats = [
             ['Working URLs', $overall['working_urls'], 'Accessible and responding properly', 'Low'],
             ['Broken URLs', $overall['broken_urls'], 'Not accessible (404, 5xx errors, DNS failures)', 'High'],
-            ['Cannot Verify', $overall['cannot_verify_urls'], 'Protected by anti-bot systems or authentication', 'Medium'],
+            ['Cannot Verify', $overall['cannot_verify_urls'], 'HTTP 403 Forbidden (' . ($overall['cannot_verify_breakdown']['forbidden'] ?? 0) . ') or protected by anti-bot systems/authentication', 'Medium'],
             ['Redirected', $overall['redirected_urls'], 'HTTP redirects (may be normal)', 'Low'],
             ['Timeout', $overall['timeout_urls'], 'Request timed out (>10 seconds)', 'Medium']
         ];

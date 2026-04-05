@@ -19,6 +19,7 @@ use App\Services\PdfExportService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Session;
+use Illuminate\Support\Facades\Artisan;
 
 class VerificationController extends Controller
 {
@@ -602,8 +603,20 @@ class VerificationController extends Controller
      */
     public function clearCache(Request $request)
     {
+        // Clear all Laravel caches
+        Artisan::call('cache:clear');
+        Artisan::call('config:clear');
+        Artisan::call('view:clear');
+        Artisan::call('route:clear');
+        Artisan::call('optimize:clear');
+
+        // Clear custom persistent cache
         $this->urlValidator->clearPersistentCache();
-        return back()->with('success', 'Cache cleared successfully');
+
+        // Clear session data
+        Session::forget('verification_results');
+
+        return response('All caches cleared successfully', 200);
     }
 
     /**
@@ -677,7 +690,7 @@ class VerificationController extends Controller
             
             // Use batchValidateWithAnalysis for parallel execution within batch (very low concurrency for stability)
             $batchItems = array_map(fn($b) => $b['item'], $batch);
-            $batchResults = $this->urlValidator->batchValidateWithAnalysis($batchItems, 3);
+            $batchResults = $this->urlValidator->batchValidateWithAnalysis($batchItems, 10);
             
             // Map results back to filteredRows using stored indices
             $processedInBatch = 0;

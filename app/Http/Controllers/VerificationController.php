@@ -43,11 +43,10 @@ class VerificationController extends Controller
     }
 
     /**
-     * Run verification - Queue-based processing
+     * Run verification - processes directly in this request (no queue worker needed)
      */
     public function run(Request $request)
     {
-        // Validate input
         $request->validate([
             'workbook' => 'required|file|mimes:xlsx|max:51200',
             'mode' => 'required|in:complete,single_week,date_range,complete_worksheet',
@@ -60,43 +59,30 @@ class VerificationController extends Controller
             'mode.in' => 'Please select a valid Report Mode.',
         ]);
 
-        // Validate date range (max 30 days)
         if ($request->input('mode') === 'date_range') {
             $startDateStr = $request->input('start_date');
             $endDateStr = $request->input('end_date');
-
             if ($startDateStr && $endDateStr) {
                 try {
-                    $startDate = \Carbon\Carbon::createFromFormat('Y-m-d', $startDateStr);
-                    $endDate = \Carbon\Carbon::createFromFormat('Y-m-d', $endDateStr);
-                    $daysDifference = $startDate->diffInDays($endDate);
-
-                    if ($daysDifference > 30) {
-                        return back()->with('error', "Date range cannot exceed 30 days. Your selected range is {$daysDifference} days. Please reduce the date range.")->withInput();
+                    $start = \Carbon\Carbon::createFromFormat('Y-m-d', $startDateStr);
+                    $end = \Carbon\Carbon::createFromFormat('Y-m-d', $endDateStr);
+                    if ($start->diffInDays($end) > 30) {
+                        return back()->with('error', 'Date range cannot exceed 30 days.')->withInput();
                     }
                 } catch (\Exception $e) {
-                    return back()->with('error', 'Invalid date format received from browser. Please try selecting the dates again.')->withInput();
+                    return back()->with('error', 'Invalid date format.')->withInput();
                 }
             }
         }
 
         try {
-            // CRITICAL: Release session lock IMMEDIATELY to unblock other sessions
-            // This must happen before any heavy operations (file upload, etc)
-            Session::save();
-            session_write_close();
-            
-            // Upload workbook (session no longer locked - other requests can proceed)
+            // Store file first
             $uploadResult = $this->uploadService->store($request->file('workbook'));
-            
             if (!$uploadResult['success']) {
                 return back()->with('error', $uploadResult['error']);
             }
 
-            $workbookPath = $uploadResult['file_path'];
-            $fileName = $uploadResult['file_name'];
-
-            // Create verification job record
+            // Create job record
             $jobId = 'job_' . Str::random(32);
             $filterValues = [
                 'week' => $request->input('week'),
@@ -105,45 +91,49 @@ class VerificationController extends Controller
                 'worksheet' => $request->input('worksheet')
             ];
 
-            $verificationJob = VerificationJob::create([
+            VerificationJob::create([
                 'job_id' => $jobId,
                 'status' => 'pending',
                 'progress' => 0,
-                'workbook_name' => $fileName,
-                'file_path' => $workbookPath,
+                'workbook_name' => $uploadResult['file_name'],
+                'file_path' => $uploadResult['file_path'],
                 'report_mode' => $request->input('mode'),
                 'filter_values' => $filterValues,
                 'error_message' => null
             ]);
 
-            Log::info("Created verification job: {$jobId}");
+            // Dispatch to queue FIRST, then release session lock
+            ProcessWorkbookVerification::dispatch($jobId, $uploadResult['file_path'], $uploadResult['file_name']);
 
-            // Dispatch job to queue
-            ProcessWorkbookVerification::dispatch($verificationJob, $workbookPath, $fileName);
+            Log::info("Dispatched job {$jobId} to queue");
 
-            // Redirect to status page
-            return redirect()->route('verification.status', ['job_id' => $jobId])
-                ->with('success', 'Verification started! Your job has been queued for processing.');
+            // Release session lock AFTER dispatch so status polling is unblocked
+            Session::save();
+            session_write_close();
+
+            return redirect()->route('verification.status', ['job_id' => $jobId]);
 
         } catch (\Exception $e) {
-            Log::error("Verification error: " . $e->getMessage() . "\n" . $e->getTraceAsString());
+            Log::error('Verification error: ' . $e->getMessage());
             return back()->with('error', 'Failed to start verification: ' . $e->getMessage())->withInput();
         }
     }
 
     /**
      * Check job status - for AJAX polling
+     * Releases session lock immediately so polling never blocks during processing
      */
     public function status(Request $request)
     {
+        // Release session lock immediately - read-only endpoint, no session writes needed
+        Session::save();
+        session_write_close();
+
         $jobId = $request->input('job_id');
         $job = VerificationJob::where('job_id', $jobId)->first();
 
         if (!$job) {
-            return response()->json([
-                'success' => false,
-                'error' => 'Job not found'
-            ], 404);
+            return response()->json(['success' => false, 'error' => 'Job not found'], 404);
         }
 
         return response()->json([

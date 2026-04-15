@@ -105,12 +105,14 @@
         letter-spacing: 0.5px;
     }
 
+    .download-buttons-row {
+        display: flex;
+        gap: 12px;
+    }
+
     .download-btn {
-        display: inline-block;
-        width: 32%;
+        flex: 1;
         padding: 16px 12px;
-        margin: 8px 0.8%;
-        margin-bottom: 12px;
         border-radius: 10px;
         text-decoration: none;
         font-weight: 600;
@@ -119,6 +121,7 @@
         font-size: 14px;
         border: none;
         cursor: pointer;
+        white-space: nowrap;
     }
 
     .download-btn:hover { 
@@ -251,18 +254,12 @@
         text-decoration: none;
     }
 
-    @media (max-width: 1024px) {
-        .download-btn {
-            width: 48%;
-            margin: 8px 1%;
-        }
-    }
-
     @media (max-width: 768px) {
         .results-wrapper { margin: 20px auto; }
         .summary-card { padding: 20px; }
         .header-section h1 { font-size: 28px; }
-        .download-btn { width: 100%; margin: 8px 0; }
+        .download-buttons-row { flex-direction: column; }
+        .download-btn { width: 100%; }
         .stat-card { padding: 15px; margin-bottom: 10px; }
         .stat-value { font-size: 24px; }
         .table { font-size: 12px; }
@@ -282,15 +279,11 @@
     <!-- Download Buttons -->
     <div class="summary-card">
         <h5>📥 Download Reports</h5>
-        <a href="{{ route('verification.download', 'pdf') }}" class="download-btn btn-pdf">
-            📄 PDF Report
-        </a>
-        <a href="{{ route('verification.download', 'excel') }}" class="download-btn btn-excel">
-            📊 Excel Report
-        </a>
-        <a href="{{ route('verification.download', 'word') }}" class="download-btn btn-word">
-            📝 Word Report
-        </a>
+        <div class="download-buttons-row">
+            <a href="{{ route('verification.download', 'pdf') }}" class="download-btn btn-pdf">📄 PDF Report</a>
+            <a href="{{ route('verification.download', 'excel') }}" class="download-btn btn-excel">📊 Excel Report</a>
+            <a href="{{ route('verification.download', 'word') }}" class="download-btn btn-word">📝 Word Report</a>
+        </div>
     </div>
 
     <!-- Executive Summary -->
@@ -426,7 +419,13 @@
         <div class="summary-card">
             <h5 class="mb-3">Period Coverage</h5>
             <div class="table-responsive">
-                <table class="table">
+                <table class="table" style="width:100%; table-layout: fixed;">
+                    <colgroup>
+                        <col style="width: 20%">
+                        <col style="width: 15%">
+                        <col style="width: 25%">
+                        <col style="width: 40%">
+                    </colgroup>
                     <thead>
                         <tr>
                             <th>Worksheet</th>
@@ -449,7 +448,7 @@
                                 @endif
                             </td>
                             <td>{{ $data['start_date'] ?? '-' }} to {{ $data['end_date'] ?? '-' }}</td>
-                            <td>{{ implode(', ', $data['notes']) }}</td>
+                            <td style="word-wrap: break-word; overflow-wrap: break-word;">{{ implode(', ', $data['notes']) }}</td>
                         </tr>
                         @endforeach
                     </tbody>

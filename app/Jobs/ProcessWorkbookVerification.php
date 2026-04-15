@@ -23,48 +23,20 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Storage;
 
 class ProcessWorkbookVerification implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public $timeout = 2700; // 45 minutes
-    public $tries = 1;      // Try once, then fail (to avoid "attempted too many times")
-    public $backoff = 60;   // Wait 60 seconds before retry
+    public $timeout = 2700;
+    public $tries = 1;
 
     public function __construct(
-        private VerificationJob $verificationJob,
+        private string $jobId,
         private string $workbookPath,
         private string $fileName
-    ) {
-    }
+    ) {}
 
-    /**
-     * Determine if the job should be retried
-     */
-    public function shouldRetry(\Throwable $exception): bool
-    {
-        // Don't retry on timeout or serialization errors
-        if (strpos($exception->getMessage(), 'timeout') !== false ||
-            strpos($exception->getMessage(), 'serialization') !== false) {
-            return false;
-        }
-        return true;
-    }
-
-    /**
-     * Handle job failure before marking it failed
-     */
-    public function retryUntil()
-    {
-        // Don't retry after 2 hours
-        return now()->addHours(2);
-    }
-
-    /**
-     * Execute the job
-     */
     public function handle(): void
     {
         set_time_limit(2700);
@@ -72,91 +44,79 @@ class ProcessWorkbookVerification implements ShouldQueue
 
         $startTime = microtime(true);
 
+        $job = VerificationJob::where('job_id', $this->jobId)->first();
+        if (!$job) {
+            Log::error("Verification job not found: {$this->jobId}");
+            return;
+        }
+
         try {
-            // Verify workbook file exists and is readable
             if (!file_exists($this->workbookPath)) {
                 throw new \Exception("Workbook file not found at: {$this->workbookPath}");
             }
             if (!is_readable($this->workbookPath)) {
                 throw new \Exception("Workbook file is not readable: {$this->workbookPath}");
             }
-            
-            Log::info("Job {$this->verificationJob->job_id} started. File: {$this->workbookPath} (" . filesize($this->workbookPath) . " bytes)");
 
-            // Resolve services from container
-            $uploadService = app(WorkbookUploadService::class);
-            $scannerService = app(WorksheetScannerService::class);
-            $headerService = app(HeaderMappingService::class);
-            $dateParser = app(DateParserService::class);
-            $rowNormalizer = app(RowNormalizationService::class);
-            $filterService = app(ReportScopeFilterService::class);
-            $urlValidator = app(UrlValidationService::class);
-            $contentExtractor = app(ContentExtractionService::class);
-            $postAnalyzer = app(PostAnalysisService::class);
-            $coverageService = app(CoverageEvaluationService::class);
-            $summaryService = app(SummaryAggregationService::class);
-            $excelExport = app(ExcelExportService::class);
-            $wordExport = app(WordExportService::class);
-            $pdfExport = app(PdfExportService::class);
+            Log::info("Job {$job->job_id} started. File: {$this->workbookPath} (" . filesize($this->workbookPath) . " bytes)");
 
-            // Update job status
-            $this->verificationJob->update([
-                'status' => 'processing',
-                'started_at' => now(),
-                'progress' => 0
-            ]);
+            $uploadService    = app(WorkbookUploadService::class);
+            $scannerService   = app(WorksheetScannerService::class);
+            $headerService    = app(HeaderMappingService::class);
+            $rowNormalizer    = app(RowNormalizationService::class);
+            $filterService    = app(ReportScopeFilterService::class);
+            $urlValidator     = app(UrlValidationService::class);
+            $postAnalyzer     = app(PostAnalysisService::class);
+            $coverageService  = app(CoverageEvaluationService::class);
+            $summaryService   = app(SummaryAggregationService::class);
+            $excelExport      = app(ExcelExportService::class);
+            $wordExport       = app(WordExportService::class);
+            $pdfExport        = app(PdfExportService::class);
 
-            Log::info("Starting verification job {$this->verificationJob->job_id}");
+            $job->update(['status' => 'processing', 'started_at' => now(), 'progress' => 0]);
 
-            // Load workbook
-            $this->checkCancellation();
-            $this->updateProgress(5, 'Loading workbook...');
+            $this->checkCancellation($job);
+            $this->updateProgress($job, 5, 'Loading workbook...');
             $spreadsheet = $uploadService->load($this->workbookPath);
             if (!$spreadsheet) {
                 throw new \Exception('Failed to load workbook');
             }
 
-            // Scan worksheets
-            $this->checkCancellation();
-            $this->updateProgress(10, 'Scanning worksheets...');
+            $this->checkCancellation($job);
+            $this->updateProgress($job, 10, 'Scanning worksheets...');
             $worksheets = $scannerService->scan($spreadsheet);
             Log::info("Found worksheets: " . implode(", ", array_column($worksheets, 'name')));
 
-            // Process each worksheet
-            $this->checkCancellation();
-            $this->updateProgress(15, 'Processing worksheets...');
-            $processedData = [
-                'by_worksheet' => [],
-                'all_rows' => []
-            ];
+            $this->checkCancellation($job);
+            $this->updateProgress($job, 15, 'Processing worksheets...');
 
-            $reportMode = $this->verificationJob->report_mode;
-            $filterValues = $this->verificationJob->filter_values ?? [];
+            $reportMode   = $job->report_mode;
+            $filterValues = $job->filter_values ?? [];
+            if (is_string($filterValues)) {
+                $filterValues = json_decode($filterValues, true) ?? [];
+            }
 
-            $worksheetCount = count($worksheets);
-            $worksheetIndex = 0;
+            $processedData   = ['by_worksheet' => [], 'all_rows' => []];
+            $worksheetCount  = count($worksheets);
+            $worksheetIndex  = 0;
 
             foreach ($worksheets as $worksheetInfo) {
                 $worksheetIndex++;
-                $worksheetProgress = 15 + (($worksheetIndex / $worksheetCount) * 60); // 15-75% for worksheets
-                $this->updateProgress((int)$worksheetProgress, "Processing worksheet: {$worksheetInfo['name']}");
-
-                $this->checkCancellation();
+                $worksheetProgress = 15 + (($worksheetIndex / $worksheetCount) * 60);
+                $this->updateProgress($job, (int)$worksheetProgress, "Processing worksheet: {$worksheetInfo['name']}");
+                $this->checkCancellation($job);
 
                 $sheet = $spreadsheet->getSheetByName($worksheetInfo['name']);
                 if (!$sheet) continue;
 
-                // Skip Meta Tags worksheet
                 if (strtolower($worksheetInfo['name']) === 'meta tags') {
                     Log::info("Skipping Meta Tags worksheet");
                     continue;
                 }
 
-                // Get worksheet data
-                $sheetData = $scannerService->getWorksheetData($sheet);
+                $sheetData     = $scannerService->getWorksheetData($sheet);
                 $headerMapping = $headerService->map($sheetData['headers']);
 
-                // Detect Validation Status column
                 $validationStatusColIdx = null;
                 for ($colIdx = 1; $colIdx <= 50; $colIdx++) {
                     $colLetter = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($colIdx);
@@ -167,52 +127,36 @@ class ProcessWorkbookVerification implements ShouldQueue
                     }
                 }
 
-                // Skip if no URL columns
                 if (empty($headerMapping['url_columns'])) {
-                    Log::info("Skipping '" . $worksheetInfo['name'] . "' - no Submission page column");
+                    Log::info("Skipping '{$worksheetInfo['name']}' - no Submission page column");
                     continue;
                 }
 
-                // Filter worksheet if needed
-                $worksheetFilter = $this->verificationJob->filter_values['worksheet'] ?? null;
-                if ($reportMode !== 'complete_worksheet' && !empty($worksheetFilter) && 
+                $worksheetFilter = $filterValues['worksheet'] ?? null;
+                if ($reportMode !== 'complete_worksheet' && !empty($worksheetFilter) &&
                     strtolower($worksheetInfo['name']) !== strtolower($worksheetFilter)) {
-                    Log::info("Skipping '" . $worksheetInfo['name'] . "' - not matching filter");
+                    Log::info("Skipping '{$worksheetInfo['name']}' - not matching filter");
                     continue;
                 }
 
-                // Normalize rows
                 $normalizedRows = [];
                 foreach ($sheetData['rows'] as $row) {
-                    $normalized = $rowNormalizer->normalize(
-                        $row['data'],
-                        $headerMapping,
-                        $worksheetInfo['name'],
-                        $row['row_number']
+                    $normalizedRows[] = $rowNormalizer->normalize(
+                        $row['data'], $headerMapping, $worksheetInfo['name'], $row['row_number']
                     );
-                    $normalizedRows[] = $normalized;
                 }
 
-                // Filter by mode
-                $filteredRows = $filterService->filter(
-                    $normalizedRows,
-                    $reportMode,
-                    $filterValues
-                );
+                $filteredRows = $filterService->filter($normalizedRows, $reportMode, $filterValues);
 
-                // Validate URLs
-                $this->updateProgress((int)$worksheetProgress + 5, "Validating URLs in {$worksheetInfo['name']}...");
+                $this->updateProgress($job, (int)$worksheetProgress + 5, "Validating URLs in {$worksheetInfo['name']}...");
                 $validationItems = [];
-                $rowIndexes = [];
-                $urlIndexes = [];
 
                 foreach ($filteredRows as $rowIndex => &$filteredRow) {
                     if (!$filteredRow['included_in_scope']) continue;
 
-                    $ourUrl = null;
+                    $ourUrl  = null;
                     foreach ($filteredRow['urls'] as $urlInfo) {
-                        $colName = strtolower($urlInfo['column_name'] ?? '');
-                        if (str_contains($colName, 'our url')) {
+                        if (str_contains(strtolower($urlInfo['column_name'] ?? ''), 'our url')) {
                             $ourUrl = $urlInfo['original_url'];
                             break;
                         }
@@ -221,354 +165,216 @@ class ProcessWorkbookVerification implements ShouldQueue
 
                     foreach ($filteredRow['urls'] as $urlIdx => $urlData) {
                         $validationItems[] = [
-                            'url' => $urlData['original_url'],
-                            'ourUrl' => $ourUrl,
-                            'keyword' => $keyword,
+                            'url'      => $urlData['original_url'],
+                            'ourUrl'   => $ourUrl,
+                            'keyword'  => $keyword,
                             'rowIndex' => $rowIndex,
                             'urlIndex' => $urlIdx
                         ];
-                        $rowIndexes[] = $rowIndex;
-                        $urlIndexes[] = $urlIdx;
                     }
                 }
 
-                // Sort validation items deterministically
                 if (count($validationItems) > 1000) {
-                    $chunkSize = 500;
-                    $sortedItems = [];
-                    foreach (array_chunk($validationItems, $chunkSize) as $chunk) {
+                    $sorted = [];
+                    foreach (array_chunk($validationItems, 500) as $chunk) {
                         usort($chunk, fn($a, $b) => strcmp($a['url'], $b['url']));
-                        $sortedItems = array_merge($sortedItems, $chunk);
+                        $sorted = array_merge($sorted, $chunk);
                     }
-                    usort($sortedItems, fn($a, $b) => strcmp($a['url'], $b['url']));
-                    $validationItems = $sortedItems;
+                    usort($sorted, fn($a, $b) => strcmp($a['url'], $b['url']));
+                    $validationItems = $sorted;
                 } else {
                     usort($validationItems, fn($a, $b) => strcmp($a['url'], $b['url']));
                 }
 
-                Log::info("Processing " . count($validationItems) . " URLs");
-
-                // Batch validate
                 if (!empty($validationItems)) {
-                    $this->validateWithDomainBatching($validationItems, $rowIndexes, $urlIndexes, $filteredRows, $urlValidator);
+                    $this->validateWithDomainBatching($validationItems, $filteredRows, $urlValidator, $job);
                     $urlValidator->savePersistentCache();
                 }
 
-                // Analyze posts
                 $postAnalyzer->analyzeMultiple($filteredRows, $reportMode);
 
-                // Memory cleanup
                 if (memory_get_usage(true) > 500 * 1024 * 1024) {
                     gc_collect_cycles();
                 }
 
-                // Write validation status
                 if ($validationStatusColIdx) {
-                    foreach ($filteredRows as $rowIdx => $rowProc) {
+                    foreach ($filteredRows as $rowProc) {
                         $rowNum = $rowProc['row_number'] ?? null;
-                        if (!$rowNum) continue;
-                        $statusVal = null;
-                        if (!empty($rowProc['urls'])) {
-                            $firstUrl = reset($rowProc['urls']);
-                            $statusVal = $firstUrl['status'] ?? 'Unknown';
-                        }
-                        if ($statusVal) {
-                            $sheet->setCellValueByColumnAndRow($validationStatusColIdx, $rowNum, $statusVal);
-                        }
+                        if (!$rowNum || empty($rowProc['urls'])) continue;
+                        $firstUrl  = reset($rowProc['urls']);
+                        $statusVal = $firstUrl['status'] ?? 'Unknown';
+                        $colLetter = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($validationStatusColIdx);
+                        $sheet->setCellValue($colLetter . $rowNum, $statusVal);
                     }
                 }
 
-                // Add to processed data
-                if ($reportMode === 'complete' || 
-                    ($reportMode !== 'complete' && $this->worksheetHasIncludedRows($filteredRows))) {
+                if ($reportMode === 'complete' || $this->worksheetHasIncludedRows($filteredRows)) {
                     $processedData['by_worksheet'][$worksheetInfo['name']] = $filteredRows;
-                    $processedData['all_rows'] = array_merge(
-                        $processedData['all_rows'],
-                        $filteredRows
-                    );
+                    $processedData['all_rows'] = array_merge($processedData['all_rows'], $filteredRows);
                 }
             }
 
-            // Verify we have data
-            $this->updateProgress(80, 'Generating summary...');
+            $this->updateProgress($job, 80, 'Generating summary...');
             if ($reportMode === 'complete' && empty($processedData['by_worksheet'])) {
                 throw new \Exception("No worksheets processed. Please check your workbook.");
             }
 
-            $this->checkCancellation();
+            $this->checkCancellation($job);
 
-            // Generate summary
-            $summary = $summaryService->generateSummary(
-                $processedData,
-                $reportMode,
-                $filterValues
-            );
-
+            $summary = $summaryService->generateSummary($processedData, $reportMode, $filterValues);
             if (empty($summary['overall']['weeks_found'])) {
                 throw new \Exception('No valid periods or weeks found in the Excel sheet.');
             }
 
-            // Generate exceptions
             $exceptions = $summaryService->generateExceptions($processedData);
 
-            // Evaluate coverage
-            $this->updateProgress(85, 'Evaluating coverage...');
+            $this->updateProgress($job, 85, 'Evaluating coverage...');
             $coverage = [];
             foreach ($processedData['by_worksheet'] as $wsName => $rows) {
-                $coverage[$wsName] = $coverageService->evaluateWorksheetCoverage(
-                    $rows,
-                    $reportMode,
-                    $filterValues
-                );
+                $coverage[$wsName] = $coverageService->evaluateWorksheetCoverage($rows, $reportMode, $filterValues);
             }
 
-            // Export to all formats
-            $this->updateProgress(90, 'Exporting to Excel, Word, PDF...');
-            $currentTime = time() + (5.5 * 3600);
-            $timestamp = date('Y-m-d_H-i-s', $currentTime) . '_' . str_replace('.', '-', microtime(true));
-            $baseFileName = 'Verification_Report_' . $timestamp;
+            $this->updateProgress($job, 90, 'Exporting reports...');
+            $currentTime  = time() + (5.5 * 3600);
+            $timestamp    = date('Y-m-d_H-i-s', $currentTime) . '_' . str_replace('.', '-', microtime(true));
+            $baseName     = 'Verification_Report_' . $timestamp;
 
-            $excelFileName = $baseFileName . '.xlsx';
-            $wordFileName = $baseFileName . '.docx';
-            $pdfFileName = $baseFileName . '.pdf';
+            $excelFile = $excelExport->export($summary, $exceptions, $coverage, $baseName . '.xlsx');
+            $wordFile  = $wordExport->export($summary, $exceptions, $coverage, $this->fileName, [
+                'generated_at' => date('Y-m-d H:i:s'), 'mode' => $reportMode,
+                'filter' => $filterValues, 'timestamp' => $timestamp
+            ], $baseName . '.docx');
+            $pdfFile   = $pdfExport->export($summary, $exceptions, $coverage, $this->fileName, [
+                'generated_at' => date('Y-m-d H:i:s'), 'mode' => $reportMode,
+                'filter' => $filterValues, 'timestamp' => $timestamp
+            ], $baseName . '.pdf');
 
-            $excelFile = $excelExport->export($summary, $exceptions, $coverage, $excelFileName);
-            $wordFile = $wordExport->export($summary, $exceptions, $coverage, $this->fileName, [
-                'generated_at' => date('Y-m-d H:i:s'),
-                'mode' => $reportMode,
-                'filter' => $filterValues,
-                'timestamp' => $timestamp
-            ], $wordFileName);
-            $pdfFile = $pdfExport->export($summary, $exceptions, $coverage, $this->fileName, [
-                'generated_at' => date('Y-m-d H:i:s'),
-                'mode' => $reportMode,
-                'filter' => $filterValues,
-                'timestamp' => $timestamp
-            ], $pdfFileName);
-
-            // Save spread with validation status
             $inputExcelFile = storage_path('app/exports/Input_Excel_File_' . $timestamp . '.xlsx');
-            $writer = new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($spreadsheet);
-            $writer->save($inputExcelFile);
+            (new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($spreadsheet))->save($inputExcelFile);
 
-            // Cleanup
             $uploadService->cleanup($this->workbookPath);
 
-            // Mark as completed
             $elapsed = round(microtime(true) - $startTime, 2);
-            $this->verificationJob->update([
-                'status' => 'completed',
-                'progress' => 100,
-                'completed_at' => now(),
-                'elapsed_time' => $elapsed,
-                'excel_file' => basename($excelFile),
-                'word_file' => basename($wordFile),
-                'pdf_file' => basename($pdfFile),
-                'summary' => $summary,
-                'coverage' => $coverage,
-                'exceptions' => $exceptions
+            $job->update([
+                'status'      => 'completed',
+                'progress'    => 100,
+                'completed_at'=> now(),
+                'elapsed_time'=> $elapsed,
+                'excel_file'  => basename($excelFile),
+                'word_file'   => basename($wordFile),
+                'pdf_file'    => basename($pdfFile),
+                'summary'     => $summary,
+                'coverage'    => $coverage,
+                'exceptions'  => $exceptions
             ]);
 
-            Log::info("Verification job {$this->verificationJob->job_id} completed in {$elapsed}s");
+            Log::info("Job {$job->job_id} completed in {$elapsed}s");
 
         } catch (\Exception $e) {
-            Log::error("Verification job {$this->verificationJob->job_id} failed: " . $e->getMessage());
-            $this->verificationJob->update([
-                'status' => 'failed',
+            Log::error("Job {$this->jobId} failed: " . $e->getMessage());
+            $job->update([
+                'status'       => strpos($e->getMessage(), 'cancelled') !== false ? 'cancelled' : 'failed',
                 'completed_at' => now(),
                 'elapsed_time' => round(microtime(true) - $startTime, 2),
-                'error_message' => $e->getMessage()
+                'error_message'=> $e->getMessage()
             ]);
             throw $e;
         }
     }
 
-    /**
-     * Validate URLs with domain-aware batching
-     */
-    private function validateWithDomainBatching(array $validationItems, array $rowIndexes, array $urlIndexes, array &$filteredRows, UrlValidationService $urlValidator): void
+    private function validateWithDomainBatching(array $validationItems, array &$filteredRows, UrlValidationService $urlValidator, VerificationJob $job): void
     {
-        $batchSize = 10;
-        $batches = [];
+        $batchSize    = 10;
+        $batches      = [];
         $currentBatch = [];
-        $usedDomains = [];
+        $usedDomains  = [];
 
         foreach ($validationItems as $i => $item) {
-            $url = $item['url'] ?? '';
-            $domain = $this->extractDomain($url);
+            $domain = parse_url($item['url'] ?? '', PHP_URL_HOST) ?? '';
 
-            if (!empty($domain)) {
-                if (!isset($usedDomains[$domain])) {
-                    $currentBatch[] = ['index' => $i, 'item' => $item, 'domain' => $domain];
-                    $usedDomains[$domain] = true;
+            if (!empty($domain) && isset($usedDomains[$domain])) {
+                $batches[]    = $currentBatch;
+                $currentBatch = [];
+                $usedDomains  = [];
+            }
 
-                    if (count($currentBatch) >= $batchSize) {
-                        $batches[] = $currentBatch;
-                        $currentBatch = [];
-                        $usedDomains = [];
-                    }
-                } else {
-                    if (!empty($currentBatch)) {
-                        $batches[] = $currentBatch;
-                        $currentBatch = [];
-                        $usedDomains = [];
-                    }
-                    $currentBatch[] = ['index' => $i, 'item' => $item, 'domain' => $domain];
-                    $usedDomains[$domain] = true;
-                }
-            } else {
-                if (count($currentBatch) > 0 && count($currentBatch) < $batchSize) {
-                    $currentBatch[] = ['index' => $i, 'item' => $item, 'domain' => ''];
-                } else {
-                    if (!empty($currentBatch)) {
-                        $batches[] = $currentBatch;
-                        $currentBatch = [];
-                        $usedDomains = [];
-                    }
-                    $currentBatch[] = ['index' => $i, 'item' => $item, 'domain' => ''];
-                }
+            $currentBatch[] = ['index' => $i, 'item' => $item];
+            if (!empty($domain)) $usedDomains[$domain] = true;
+
+            if (count($currentBatch) >= $batchSize) {
+                $batches[]    = $currentBatch;
+                $currentBatch = [];
+                $usedDomains  = [];
             }
         }
+        if (!empty($currentBatch)) $batches[] = $currentBatch;
 
-        if (!empty($currentBatch)) {
-            $batches[] = $currentBatch;
-        }
-
-        Log::info("Processing URLs in " . count($batches) . " batches");
-
-        $totalProcessed = 0;
-        $totalUrlsToProcess = count($validationItems);
+        $totalProcessed      = 0;
+        $totalUrlsToProcess  = count($validationItems);
 
         foreach ($batches as $batchNum => $batch) {
-            Log::info("Batch " . ($batchNum + 1) . "/" . count($batches));
-            
-            $batchItems = array_map(fn($b) => $b['item'], $batch);
+            $batchItems   = array_map(fn($b) => $b['item'], $batch);
             $batchResults = $urlValidator->batchValidateWithAnalysis($batchItems, 10);
 
             foreach ($batch as $batchIdx => $batchItem) {
-                $res = $batchResults[$batchIdx] ?? [];
+                $res  = $batchResults[$batchIdx] ?? [];
                 $rIdx = $batchItem['item']['rowIndex'];
                 $uIdx = $batchItem['item']['urlIndex'];
 
                 if (isset($filteredRows[$rIdx]['urls'][$uIdx])) {
-                    $filteredRows[$rIdx]['urls'][$uIdx]['status'] = $res['status'] ?? 'Unknown';
-                    $filteredRows[$rIdx]['urls'][$uIdx]['status_code'] = $res['status_code'] ?? 0;
-                    $filteredRows[$rIdx]['urls'][$uIdx]['final_url'] = $res['final_url'] ?? '';
-                    $filteredRows[$rIdx]['urls'][$uIdx]['error'] = $res['error'] ?? null;
-                    $filteredRows[$rIdx]['urls'][$uIdx]['cannot_verify'] = $res['cannot_verify'] ?? false;
-                    $filteredRows[$rIdx]['urls'][$uIdx]['is_blank'] = $res['is_blank'] ?? false;
+                    $filteredRows[$rIdx]['urls'][$uIdx]['status']       = $res['status'] ?? 'Unknown';
+                    $filteredRows[$rIdx]['urls'][$uIdx]['status_code']  = $res['status_code'] ?? 0;
+                    $filteredRows[$rIdx]['urls'][$uIdx]['final_url']    = $res['final_url'] ?? '';
+                    $filteredRows[$rIdx]['urls'][$uIdx]['error']        = $res['error'] ?? null;
+                    $filteredRows[$rIdx]['urls'][$uIdx]['cannot_verify']= $res['cannot_verify'] ?? false;
+                    $filteredRows[$rIdx]['urls'][$uIdx]['is_blank']     = $res['is_blank'] ?? false;
                 }
             }
 
             $totalProcessed += count($batch);
-            $progressPercent = 75 + (($totalProcessed / $totalUrlsToProcess) * 15); // 75-90% for URL validation
-            $this->updateProgress((int)$progressPercent, "Validating URLs... ({$totalProcessed}/{$totalUrlsToProcess})");
+            $this->updateProgress($job, (int)(75 + ($totalProcessed / $totalUrlsToProcess) * 15),
+                "Validating URLs... ({$totalProcessed}/{$totalUrlsToProcess})");
 
-            if (memory_get_usage(true) > 800 * 1024 * 1024) {
-                gc_collect_cycles();
-            }
-
-            usleep(500000); // 0.5 second delay
+            if (memory_get_usage(true) > 800 * 1024 * 1024) gc_collect_cycles();
+            usleep(500000);
         }
     }
 
-    /**
-     * Update job progress
-     */
-    private function updateProgress(int $progress, string $message = ''): void
+    private function updateProgress(VerificationJob $job, int $progress, string $message): void
     {
-        $this->verificationJob->update([
-            'progress' => min(100, $progress)
-        ]);
-        if (!empty($message)) {
-            Log::info("Job {$this->verificationJob->job_id}: {$message}");
-        }
+        $job->update(['progress' => min(100, $progress)]);
+        Log::info("Job {$job->job_id}: {$message}");
     }
 
-    /**
-     * Extract domain from URL
-     */
-    private function extractDomain(string $url): string
+    private function checkCancellation(VerificationJob $job): void
     {
-        try {
-            $parsed = parse_url($url);
-            return $parsed['host'] ?? '';
-        } catch (\Exception $e) {
-            return '';
-        }
-    }
-
-    /**
-     * Check if worksheet has included rows
-     */
-    private function worksheetHasIncludedRows(array $filteredRows): bool
-    {
-        foreach ($filteredRows as $row) {
-            if (isset($row['included_in_scope']) && $row['included_in_scope']) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /**
-     * Check if job was cancelled by user
-     */
-    private function checkCancellation(): void
-    {
-        // Refresh job record from database
-        $this->verificationJob->refresh();
-        
-        if ($this->verificationJob->status === 'cancelled') {
-            Log::info("Job {$this->verificationJob->job_id} was cancelled - stopping processing");
+        $job->refresh();
+        if ($job->status === 'cancelled') {
+            Log::info("Job {$job->job_id} was cancelled");
             throw new \Exception('Job was cancelled by user');
         }
     }
 
-    /**
-     * Handle job failure
-     */
+    private function worksheetHasIncludedRows(array $filteredRows): bool
+    {
+        foreach ($filteredRows as $row) {
+            if (!empty($row['included_in_scope'])) return true;
+        }
+        return false;
+    }
+
     public function failed(\Throwable $exception): void
     {
-        $errorMsg = $exception->getMessage();
-        $errorTrace = $exception->getTraceAsString();
-        
-        Log::error(
-            "❌ Job {$this->verificationJob->job_id} FAILED\n" .
-            "File: {$this->workbookPath}\n" .
-            "Attempt: {$this->attempts}/{$this->tries}\n" .
-            "Error: {$errorMsg}\n" .
-            "Trace: {$errorTrace}"
-        );
-        
-        // Check if this was a cancellation
-        if (strpos($errorMsg, 'cancelled') !== false) {
-            $this->verificationJob->update([
-                'status' => 'cancelled',
-                'completed_at' => now(),
-                'error_message' => 'Job was cancelled by user'
-            ]);
-        } else {
-            // Store detailed error message (truncated to avoid DB overflow)
-            $detailedError = "Error: " . substr($errorMsg, 0, 500);
-            if (strlen($errorMsg) > 500) {
-                $detailedError .= "\n[See Laravel logs for full trace]";
-            }
-            
-            $this->verificationJob->update([
-                'status' => 'failed',
-                'completed_at' => now(),
-                'error_message' => $detailedError,
-                'progress' => 0
-            ]);
-            
-            // Also log to file for diagnostics
-            \Storage::disk('local')->put(
-                "logs/job_errors/{$this->verificationJob->job_id}.log",
-                "Job Failed At: " . now() . "\n\n" .
-                "Exception Message:\n{$errorMsg}\n\n" .
-                "Stack Trace:\n{$errorTrace}"
-            );
-        }
+        $job = VerificationJob::where('job_id', $this->jobId)->first();
+        if (!$job) return;
+
+        Log::error("Job {$this->jobId} FAILED: " . $exception->getMessage());
+
+        $job->update([
+            'status'        => strpos($exception->getMessage(), 'cancelled') !== false ? 'cancelled' : 'failed',
+            'completed_at'  => now(),
+            'error_message' => substr($exception->getMessage(), 0, 500),
+            'progress'      => 0
+        ]);
     }
 }
